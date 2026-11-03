@@ -6,7 +6,9 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
+import android.graphics.Path
 import android.graphics.Rect
+import android.graphics.RectF
 import android.graphics.Typeface
 import android.graphics.pdf.PdfDocument
 import android.text.Layout
@@ -151,6 +153,21 @@ object PdfGenerator {
             drawPageNumber(canvas, textPaint, pageNumber)
 
             document.finishPage(page)
+
+            // ========================================================
+            // BAGIAN LAMPIRAN BUKTI DOKUMENTASI FOTO (Jika Ada Foto)
+            // ========================================================
+            val photoAttachments = entries.filter { !it.evidenceImagePath.isNullOrBlank() }
+            if (photoAttachments.isNotEmpty()) {
+                pageNumber = drawPhotoAttachmentPages(
+                    context = context,
+                    document = document,
+                    photoAttachments = photoAttachments,
+                    profile = profile,
+                    periodTitle = periodTitle,
+                    startPageNumber = pageNumber + 1
+                )
+            }
 
             // Save to File
             FileOutputStream(outputFile).use { out ->
@@ -468,6 +485,184 @@ object PdfGenerator {
             .setLineSpacing(0f, 1.15f)
             .setIncludePad(false)
             .build()
+    }
+
+    private fun drawPhotoAttachmentPages(
+        context: Context,
+        document: PdfDocument,
+        photoAttachments: List<JournalEntry>,
+        profile: UserProfile?,
+        periodTitle: String,
+        startPageNumber: Int
+    ): Int {
+        var pageNumber = startPageNumber
+        val cardHeight = 315f
+        val cardW = CONTENT_WIDTH
+        val cardX = MARGIN_LEFT
+
+        val cardBgPaint = Paint().apply {
+            color = Color.WHITE
+            style = Paint.Style.FILL
+        }
+        val cardBorderPaint = Paint().apply {
+            color = Color.parseColor("#CBD5E1")
+            style = Paint.Style.STROKE
+            strokeWidth = 0.8f
+        }
+        val badgeBgPaint = Paint().apply {
+            color = Color.parseColor("#F1F5F9")
+            style = Paint.Style.FILL
+        }
+        val badgeTextPaint = TextPaint().apply {
+            color = Color.parseColor("#0F172A")
+            textSize = 8.5f
+            typeface = Typeface.DEFAULT_BOLD
+            isAntiAlias = true
+        }
+        val labelPaint = TextPaint().apply {
+            color = Color.parseColor("#475569")
+            textSize = 8f
+            typeface = Typeface.DEFAULT_BOLD
+            isAntiAlias = true
+        }
+        val textPaint = TextPaint().apply {
+            color = Color.parseColor("#0F172A")
+            textSize = 8f
+            isAntiAlias = true
+        }
+        val reportTitlePaint = TextPaint().apply {
+            color = Color.BLACK
+            textSize = 11f
+            typeface = Typeface.DEFAULT_BOLD
+            textAlign = Paint.Align.CENTER
+            isAntiAlias = true
+        }
+        val subtitlePaint = TextPaint().apply {
+            color = Color.DKGRAY
+            textSize = 9f
+            textAlign = Paint.Align.CENTER
+            isAntiAlias = true
+        }
+        val smallInfoPaint = TextPaint().apply {
+            color = Color.DKGRAY
+            textSize = 8.5f
+            textAlign = Paint.Align.CENTER
+            isAntiAlias = true
+        }
+        val dividerPaint = Paint().apply {
+            color = Color.parseColor("#CBD5E1")
+            style = Paint.Style.STROKE
+            strokeWidth = 0.75f
+        }
+        val photoFramePaint = Paint().apply {
+            color = Color.parseColor("#E2E8F0")
+            style = Paint.Style.STROKE
+            strokeWidth = 0.75f
+        }
+
+        var pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
+        var page = document.startPage(pageInfo)
+        var canvas = page.canvas
+
+        fun drawAttachmentHeader(c: Canvas): Float {
+            var y = 45f
+            c.drawText("LAMPIRAN BUKTI DOKUMENTASI FOTO KEGIATAN", PAGE_WIDTH / 2f, y, reportTitlePaint)
+            y += 15f
+            c.drawText("Periode: $periodTitle", PAGE_WIDTH / 2f, y, subtitlePaint)
+            y += 13f
+            val school = profile?.schoolName?.ifBlank { "SMK Negeri 2 Tanjung" } ?: "SMK Negeri 2 Tanjung"
+            val empName = profile?.fullName?.ifBlank { "-" } ?: "-"
+            c.drawText("$school • Pegawai: $empName", PAGE_WIDTH / 2f, y, smallInfoPaint)
+            y += 10f
+            c.drawLine(MARGIN_LEFT, y, MARGIN_RIGHT, y, dividerPaint)
+            return y + 16f
+        }
+
+        var curY = drawAttachmentHeader(canvas)
+
+        photoAttachments.forEachIndexed { idx, photo ->
+            if (curY + cardHeight > MARGIN_BOTTOM) {
+                drawPageNumber(canvas, textPaint, pageNumber)
+                document.finishPage(page)
+
+                pageNumber++
+                pageInfo = PdfDocument.PageInfo.Builder(PAGE_WIDTH, PAGE_HEIGHT, pageNumber).create()
+                page = document.startPage(pageInfo)
+                canvas = page.canvas
+                curY = drawAttachmentHeader(canvas)
+            }
+
+            // Card border & background
+            val cardRect = RectF(cardX, curY, cardX + cardW, curY + cardHeight)
+            canvas.drawRoundRect(cardRect, 6f, 6f, cardBgPaint)
+            canvas.drawRoundRect(cardRect, 6f, 6f, cardBorderPaint)
+
+            // Header badge inside card
+            val badgePath = Path().apply {
+                addRoundRect(
+                    RectF(cardX, curY, cardX + cardW, curY + 22f),
+                    floatArrayOf(6f, 6f, 6f, 6f, 0f, 0f, 0f, 0f),
+                    Path.Direction.CW
+                )
+            }
+            canvas.drawPath(badgePath, badgeBgPaint)
+            canvas.drawLine(cardX, curY + 22f, cardX + cardW, curY + 22f, cardBorderPaint)
+            canvas.drawText("Dokumentasi #${idx + 1} • ${photo.dayOfWeek}, ${photo.formattedDate}", cardX + 10f, curY + 15f, badgeTextPaint)
+
+            // Photo
+            val imgBoxW = 280f
+            val imgBoxH = 190f
+            val imgX = cardX + (cardW - imgBoxW) / 2f
+            val imgY = curY + 29f
+
+            val imgFile = File(photo.evidenceImagePath!!)
+            if (imgFile.exists() && FileUtils.isSafeEvidenceFile(context, imgFile)) {
+                val bitmap = decodeSampledBitmap(imgFile.absolutePath, 700, 500)
+                if (bitmap != null) {
+                    try {
+                        val srcRatio = bitmap.width.toFloat() / bitmap.height.toFloat()
+                        val targetRatio = imgBoxW / imgBoxH
+                        val finalW: Float
+                        val finalH: Float
+                        if (srcRatio > targetRatio) {
+                            finalW = imgBoxW
+                            finalH = imgBoxW / srcRatio
+                        } else {
+                            finalH = imgBoxH
+                            finalW = imgBoxH * srcRatio
+                        }
+                        val drawX = imgX + (imgBoxW - finalW) / 2f
+                        val drawY = imgY + (imgBoxH - finalH) / 2f
+                        canvas.drawRect(drawX - 1f, drawY - 1f, drawX + finalW + 1f, drawY + finalH + 1f, photoFramePaint)
+                        val destRect = Rect(drawX.toInt(), drawY.toInt(), (drawX + finalW).toInt(), (drawY + finalH).toInt())
+                        canvas.drawBitmap(bitmap, null, destRect, null)
+                    } finally {
+                        bitmap.recycle()
+                    }
+                }
+            }
+
+            // Captions below photo
+            var textY = imgY + imgBoxH + 16f
+            canvas.drawText("Kegiatan:", cardX + 16f, textY, labelPaint)
+            val descLayout = createStaticLayout(photo.description, textPaint, (cardW - 90f).toInt())
+            canvas.save()
+            canvas.translate(cardX + 65f, textY - 8f)
+            descLayout.draw(canvas)
+            canvas.restore()
+
+            if (!photo.evidenceText.isNullOrBlank()) {
+                textY += descLayout.height.toFloat() + 4f
+                canvas.drawText("Bukti Teks:", cardX + 16f, textY, labelPaint)
+                canvas.drawText(photo.evidenceText, cardX + 65f, textY, textPaint)
+            }
+
+            curY += cardHeight + 15f
+        }
+
+        drawPageNumber(canvas, textPaint, pageNumber)
+        document.finishPage(page)
+        return pageNumber
     }
 
     private fun decodeSampledBitmap(path: String, reqWidth: Int, reqHeight: Int): Bitmap? {
