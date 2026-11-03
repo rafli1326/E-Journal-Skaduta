@@ -320,17 +320,6 @@ export default function App() {
             {entries.length} Kegiatan
           </span>
         )}
-        {activeTab === 'form' && (
-          <button
-            type="button"
-            disabled={isSaving}
-            onClick={handleSaveTasks}
-            className="flex items-center gap-1 bg-brand-orange text-white text-xs font-bold px-3 py-1.5 rounded-lg active:scale-95 transition disabled:opacity-50"
-          >
-            <Check size={14} />
-            Simpan
-          </button>
-        )}
         {activeTab === 'profile' && (
           <button 
             type="button"
@@ -733,7 +722,7 @@ export default function App() {
                 className="w-full border border-dashed border-brand-orange text-brand-orange font-bold text-xs py-2.5 rounded-lg flex items-center justify-center gap-1 hover:bg-orange-50"
               >
                 <Plus size={14} />
-                + Tambah Kegiatan Lain untuk Hari Ini
+                Tambah Kegiatan Lain untuk Hari Ini
               </button>
             )}
 
