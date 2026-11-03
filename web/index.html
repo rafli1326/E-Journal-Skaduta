@@ -13,40 +13,31 @@
     <meta name="apple-mobile-web-app-title" content="E-Journal" />
     <link rel="apple-touch-icon" href="./icons/icon-192.png" />
     <link rel="icon" type="image/png" href="./favicon.png" />
-
-    <!-- Sembunyikan badge bawaan Netlify -->
-    <style>
-      [data-netlify-badge], 
-      .netlify-badge, 
-      div[style*="position: fixed"][style*="bottom:"], 
-      a[href*="netlify.com"][style*="position: fixed"],
-      iframe[src*="netlify"] {
-        display: none !important;
-        opacity: 0 !important;
-        visibility: hidden !important;
-        pointer-events: none !important;
-      }
-    </style>
   </head>
-  <body class="bg-[#F8FAFC] text-[#0F172A] select-none antialiased">
+  <body class="bg-[#F8FAFC] text-[#0F172A] antialiased">
     <div id="root"></div>
     <script type="module" src="./src/main.jsx"></script>
     <script>
+      // Bersihkan cache Service Worker lama (v1/v2) agar tidak menyajikan script usang
+      if ('caches' in window) {
+        caches.keys().then((keys) => {
+          keys.forEach((key) => {
+            if (key !== 'ejournal-skaduta-v3') {
+              caches.delete(key);
+            }
+          });
+        }).catch(() => {});
+      }
+
       if ('serviceWorker' in navigator) {
         window.addEventListener('load', () => {
-          navigator.serviceWorker.register('./sw.js').catch(() => {});
+          navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
+            .then((reg) => {
+              reg.update().catch(() => {});
+            })
+            .catch(() => {});
         });
       }
-      
-      // Script pengaman tambahan untuk menghapus elemen badge netlify jika disuntikkan secara dinamis
-      const observer = new MutationObserver(() => {
-        document.querySelectorAll('a[href*="netlify.com"], div[id*="netlify"], [data-netlify-badge]').forEach(el => {
-          if (el.textContent && el.textContent.toLowerCase().includes('netlify')) {
-            el.remove();
-          }
-        });
-      });
-      observer.observe(document.documentElement, { childList: true, subtree: true });
     </script>
   </body>
 </html>

@@ -9,10 +9,8 @@ import {
 } from './db';
 import { 
   formatDate, 
-  formatShortDate, 
   getDayOfWeek, 
-  formatMonthYear, 
-  indonesianMonths 
+  formatMonthYear 
 } from './dateUtils';
 import { generateReportPdf } from './pdfGenerator';
 import { 
@@ -29,10 +27,53 @@ import {
   Image as ImageIcon, 
   X, 
   Check, 
-  Clock, 
-  Bell, 
   ArrowLeft 
 } from 'lucide-react';
+
+function getLocalDateString(millis = Date.now()) {
+  const d = new Date(millis);
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function compressImageFile(file, maxDim = 1024, quality = 0.75) {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const dataUrl = e.target.result;
+      const img = new Image();
+      img.onload = () => {
+        try {
+          let { width, height } = img;
+          if (width > maxDim || height > maxDim) {
+            if (width >= height) {
+              height = Math.round((height * maxDim) / width);
+              width = maxDim;
+            } else {
+              width = Math.round((width * maxDim) / height);
+              height = maxDim;
+            }
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          resolve(compressed || dataUrl);
+        } catch {
+          resolve(dataUrl);
+        }
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
 
 export default function App() {
   const [activeTab, setActiveTab] = useState('home'); // 'home' | 'report' | 'profile' | 'form'
@@ -47,12 +88,20 @@ export default function App() {
 
   // Form state (Add/Edit)
   const [editingId, setEditingId] = useState(null);
-  const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
+  const [formDate, setFormDate] = useState(getLocalDateString());
   const [tasks, setTasks] = useState([{ description: '', evidenceText: '', evidenceImage: null }]);
+  const [isSaving, setIsSaving] = useState(false);
 
   // Profile Form state
   const [profileForm, setProfileForm] = useState(null);
-  const [profileSavedToast, setProfileSavedToast] = useState(false);
+  const [toastMessage, setToastMessage] = useState('');
+
+  function showToast(msg) {
+    setToastMessage(msg);
+    setTimeout(() => {
+      setToastMessage((prev) => (prev === msg ? '' : prev));
+    }, 2800);
+  }
 
   useEffect(() => {
     loadData();
@@ -63,16 +112,28 @@ export default function App() {
   }, [selectedMonth, selectedYear, entries]);
 
   async function loadData() {
-    const p = await getProfile();
-    setProfile(p);
-    setProfileForm(p);
-    const all = await getAllEntries();
-    setEntries(all);
+    try {
+      const p = await getProfile();
+      setProfile(p);
+      setProfileForm((prev) => prev || p);
+    } catch (e) {
+      console.warn('loadData profile error:', e);
+    }
+    try {
+      const all = await getAllEntries();
+      setEntries(all);
+    } catch (e) {
+      console.warn('loadData entries error:', e);
+    }
   }
 
   async function loadMonthlyEntries() {
-    const list = await getEntriesByMonth(selectedMonth, selectedYear);
-    setMonthlyEntries(list);
+    try {
+      const list = await getEntriesByMonth(selectedMonth, selectedYear);
+      setMonthlyEntries(list);
+    } catch (e) {
+      console.warn('loadMonthlyEntries error:', e);
+    }
   }
 
   // Filtered entries for Home
@@ -80,8 +141,8 @@ export default function App() {
     if (!searchQuery.trim()) return true;
     const q = searchQuery.toLowerCase();
     return (
-      e.description.toLowerCase().includes(q) ||
-      e.formattedDate.toLowerCase().includes(q) ||
+      (e.description || '').toLowerCase().includes(q) ||
+      (e.formattedDate || '').toLowerCase().includes(q) ||
       (e.evidenceText && e.evidenceText.toLowerCase().includes(q))
     );
   });
@@ -89,86 +150,119 @@ export default function App() {
   // Grouped by date for Home
   const groupedEntries = {};
   filteredEntries.forEach(e => {
-    if (!groupedEntries[e.formattedDate]) {
-      groupedEntries[e.formattedDate] = {
-        dayOfWeek: e.dayOfWeek,
-        dateMillis: e.dateMillis,
+    const key = e.formattedDate || formatDate(e.dateMillis || Date.now());
+    if (!groupedEntries[key]) {
+      groupedEntries[key] = {
+        dayOfWeek: e.dayOfWeek || getDayOfWeek(e.dateMillis || Date.now()),
+        dateMillis: e.dateMillis || Date.now(),
         tasks: []
       };
     }
-    groupedEntries[e.formattedDate].tasks.push(e);
+    groupedEntries[key].tasks.push(e);
   });
 
   // Save Task Form
-  async function handleSaveTasks() {
-    const validTasks = tasks.filter(t => t.description.trim());
+  async function handleSaveTasks(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    if (isSaving) return;
+
+    const validTasks = tasks.filter(t => (t.description || '').trim().length > 0);
     if (validTasks.length === 0) {
-      alert('Harap isi minimal satu uraian kegiatan.');
+      alert('Harap isi minimal satu uraian kegiatan terlebih dahulu.');
       return;
     }
 
+    setIsSaving(true);
     try {
-      const parts = formDate.split('-');
-      const dateObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+      const parts = (formDate || '').split('-');
+      let dateObj = new Date();
+      if (parts.length === 3) {
+        const parsed = new Date(
+          parseInt(parts[0], 10),
+          parseInt(parts[1], 10) - 1,
+          parseInt(parts[2], 10),
+          12, 0, 0
+        );
+        if (!isNaN(parsed.getTime())) {
+          dateObj = parsed;
+        }
+      }
       const dateMillis = dateObj.getTime();
       const dayOfWeek = getDayOfWeek(dateMillis);
       const formattedDate = formatDate(dateMillis);
 
+      const savedItems = [];
       for (const t of validTasks) {
-        await saveEntry({
+        const saved = await saveEntry({
           id: editingId ? Number(editingId) : undefined,
           dateMillis,
           dayOfWeek,
           formattedDate,
-          description: t.description.trim(),
+          description: (t.description || '').trim(),
           evidenceType: 'COMBINED',
-          evidenceText: t.evidenceText.trim() || null,
+          evidenceText: (t.evidenceText || '').trim() || null,
           evidenceImage: t.evidenceImage || null,
           updatedAt: Date.now()
         });
+        if (saved) savedItems.push(saved);
       }
 
+      // Perbarui state langsung secara optimis sekaligus muat ulang dari storage
+      setEntries((prev) => {
+        const map = new Map();
+        prev.forEach(item => { if (item && item.id != null) map.set(Number(item.id), item); });
+        savedItems.forEach(item => { if (item && item.id != null) map.set(Number(item.id), item); });
+        return Array.from(map.values()).sort(
+          (a, b) => (b.dateMillis || 0) - (a.dateMillis || 0) || (b.id || 0) - (a.id || 0)
+        );
+      });
+
       await loadData();
-      setActiveTab('home');
       setEditingId(null);
       setTasks([{ description: '', evidenceText: '', evidenceImage: null }]);
+      setActiveTab('home');
+      showToast('Catatan kegiatan berhasil disimpan!');
     } catch (err) {
-      console.error("Gagal menyimpan kegiatan:", err);
-      alert("Terjadi kesalahan saat menyimpan: " + err.message);
+      console.error('Gagal menyimpan kegiatan:', err);
+      alert('Terjadi kesalahan saat menyimpan: ' + (err?.message || err));
+    } finally {
+      setIsSaving(false);
     }
   }
 
   // Handle Photo input
-  function handleImageUpload(index, file) {
+  async function handleImageUpload(index, file) {
     if (!file) return;
-    if (file.size > 15 * 1024 * 1024) {
-      alert('Ukuran foto terlalu besar (maksimal 15 MB).');
+    if (file.size > 20 * 1024 * 1024) {
+      alert('Ukuran foto terlalu besar (maksimal 20 MB).');
       return;
     }
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const newTasks = [...tasks];
-      newTasks[index].evidenceImage = e.target.result;
-      setTasks(newTasks);
-    };
-    reader.readAsDataURL(file);
+    const compressedDataUrl = await compressImageFile(file, 1024, 0.75);
+    if (compressedDataUrl) {
+      setTasks(prev => {
+        const next = [...prev];
+        next[index] = { ...next[index], evidenceImage: compressedDataUrl };
+        return next;
+      });
+    }
   }
 
   // Delete Entry
   async function handleDelete(id) {
     if (confirm('Hapus catatan kegiatan ini?')) {
+      setEntries(prev => prev.filter(e => Number(e.id) !== Number(id)));
       await deleteEntryDb(id);
       await loadData();
+      showToast('Kegiatan dihapus.');
     }
   }
 
   // Edit Entry
   function handleOpenEdit(entry) {
     setEditingId(entry.id);
-    const d = new Date(entry.dateMillis);
-    setFormDate(d.toISOString().split('T')[0]);
+    setFormDate(getLocalDateString(entry.dateMillis || Date.now()));
     setTasks([{
-      description: entry.description,
+      description: entry.description || '',
       evidenceText: entry.evidenceText || '',
       evidenceImage: entry.evidenceImage || null
     }]);
@@ -180,18 +274,17 @@ export default function App() {
     if (!profileForm) return;
     await saveProfileDb(profileForm);
     setProfile(profileForm);
-    setProfileSavedToast(true);
-    setTimeout(() => setProfileSavedToast(false), 2500);
+    showToast('Profil & Pengesahan Berhasil Disimpan!');
   }
 
   return (
-    <div className="flex flex-col h-screen max-w-md mx-auto bg-slate-background shadow-lg overflow-hidden border-x border-slate-borderLight">
+    <div className="flex flex-col min-h-[100dvh] h-[100dvh] max-w-md mx-auto bg-slate-background shadow-lg overflow-hidden border-x border-slate-borderLight">
       
       {/* Toast Notification */}
-      {profileSavedToast && (
-        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#0F172A] text-white px-4 py-2 rounded-lg text-sm shadow-md flex items-center gap-2 animate-bounce">
-          <Check size={16} className="text-green-400" />
-          <span>Profil & Pengesahan Berhasil Disimpan!</span>
+      {toastMessage && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-[#0F172A] text-white px-4 py-2 rounded-lg text-xs font-semibold shadow-md flex items-center gap-2">
+          <Check size={16} className="text-green-400 shrink-0" />
+          <span>{toastMessage}</span>
         </div>
       )}
 
@@ -199,7 +292,11 @@ export default function App() {
       <header className="bg-slate-surface border-b border-slate-borderLight px-4 py-2.5 flex items-center justify-between shrink-0">
         <div className="flex items-center gap-2.5">
           {activeTab === 'form' ? (
-            <button onClick={() => { setActiveTab('home'); setEditingId(null); }} className="p-1 -ml-1 text-slate-textPrimary">
+            <button
+              type="button"
+              onClick={() => { setActiveTab('home'); setEditingId(null); }}
+              className="p-1 -ml-1 text-slate-textPrimary"
+            >
               <ArrowLeft size={20} />
             </button>
           ) : (
@@ -223,8 +320,20 @@ export default function App() {
             {entries.length} Kegiatan
           </span>
         )}
+        {activeTab === 'form' && (
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={handleSaveTasks}
+            className="flex items-center gap-1 bg-brand-orange text-white text-xs font-bold px-3 py-1.5 rounded-lg active:scale-95 transition disabled:opacity-50"
+          >
+            <Check size={14} />
+            Simpan
+          </button>
+        )}
         {activeTab === 'profile' && (
           <button 
+            type="button"
             onClick={handleSaveProfile}
             className="flex items-center gap-1 bg-brand-orange text-white text-xs font-bold px-3 py-1.5 rounded-lg active:scale-95 transition"
           >
@@ -239,7 +348,7 @@ export default function App() {
         
         {/* ==================== TAB 1: HOME ==================== */}
         {activeTab === 'home' && (
-          <div className="p-3.5 space-y-3 pb-20">
+          <div className="p-3.5 space-y-3 pb-24">
             {/* Search Box */}
             <div className="relative">
               <Search className="absolute left-3 top-2.5 text-brand-orange" size={18} />
@@ -281,12 +390,12 @@ export default function App() {
 
                     <div className="space-y-2.5">
                       {group.tasks.map((task, idx) => (
-                        <div key={task.id} className="flex gap-2.5 text-xs group">
+                        <div key={task.id || idx} className="flex gap-2.5 text-xs group">
                           <span className="w-4 h-4 rounded-full bg-brand-container text-brand-onContainer text-[10px] font-bold flex items-center justify-center shrink-0 mt-0.5">
                             {idx + 1}
                           </span>
                           <div className="flex-1">
-                            <p className="text-slate-textPrimary leading-relaxed font-medium">{task.description}</p>
+                            <p className="text-slate-textPrimary leading-relaxed font-medium whitespace-pre-line">{task.description}</p>
                             {task.evidenceText && (
                               <p className="text-[11px] text-slate-textSecondary mt-0.5 flex items-center gap-1">
                                 📎 {task.evidenceText}
@@ -299,10 +408,10 @@ export default function App() {
                             )}
                           </div>
                           <div className="flex items-start gap-1 shrink-0">
-                            <button onClick={() => handleOpenEdit(task)} className="p-1 text-blue-600 hover:bg-blue-50 rounded">
+                            <button type="button" onClick={() => handleOpenEdit(task)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
                               <Edit3 size={14} />
                             </button>
-                            <button onClick={() => handleDelete(task.id)} className="p-1 text-red-600 hover:bg-red-50 rounded">
+                            <button type="button" onClick={() => handleDelete(task.id)} className="p-1.5 text-red-600 hover:bg-red-50 rounded">
                               <Trash2 size={14} />
                             </button>
                           </div>
@@ -318,12 +427,13 @@ export default function App() {
 
         {/* ==================== TAB 2: LAPORAN BULANAN ==================== */}
         {activeTab === 'report' && (
-          <div className="p-3.5 space-y-3 pb-20">
+          <div className="p-3.5 space-y-3 pb-24">
             {/* Periode Selector Card */}
             <div className="bg-white rounded-xl border border-slate-borderLight p-3 shadow-sm">
               <span className="text-[11px] font-bold text-brand-orange block mb-1">Pilih Periode Laporan</span>
               <div className="flex items-center justify-between">
                 <button 
+                  type="button"
                   onClick={() => {
                     if (selectedMonth === 0) { setSelectedMonth(11); setSelectedYear(y => y - 1); }
                     else { setSelectedMonth(m => m - 1); }
@@ -341,6 +451,7 @@ export default function App() {
                   </p>
                 </div>
                 <button 
+                  type="button"
                   onClick={() => {
                     if (selectedMonth === 11) { setSelectedMonth(0); setSelectedYear(y => y + 1); }
                     else { setSelectedMonth(m => m + 1); }
@@ -362,6 +473,7 @@ export default function App() {
                 </div>
               </div>
               <button 
+                type="button"
                 disabled={monthlyEntries.length === 0}
                 onClick={() => generateReportPdf(monthlyEntries, profile, selectedMonth, selectedYear)}
                 className="w-full bg-brand-orange disabled:opacity-50 text-white font-bold text-sm py-2.5 rounded-lg flex items-center justify-center gap-2 shadow-sm active:scale-98 transition"
@@ -378,7 +490,7 @@ export default function App() {
                 <p className="text-xs text-slate-textMuted py-4 text-center">Tidak ada kegiatan di bulan ini.</p>
               ) : (
                 monthlyEntries.map((e, idx) => (
-                  <div key={e.id} className="bg-white p-2.5 rounded-lg border border-slate-borderLight text-xs flex gap-2">
+                  <div key={e.id || idx} className="bg-white p-2.5 rounded-lg border border-slate-borderLight text-xs flex gap-2">
                     <span className="font-bold text-brand-orange shrink-0">{idx + 1}.</span>
                     <div>
                       <span className="text-[10px] font-semibold text-slate-textSecondary block">{e.dayOfWeek}, {e.formattedDate}</span>
@@ -393,7 +505,7 @@ export default function App() {
 
         {/* ==================== TAB 3: PROFIL PEGAWAI ==================== */}
         {activeTab === 'profile' && profileForm && (
-          <div className="p-3.5 space-y-3 pb-20">
+          <div className="p-3.5 space-y-3 pb-24">
             {/* Header Badge */}
             <div className="bg-gradient-to-r from-orange-50 to-amber-50 border border-brand-orange/20 rounded-xl p-2.5 flex items-center gap-2.5">
               <img src="./logo_smk2_tanjung.png" alt="Logo" className="w-7 h-7 object-contain" />
@@ -412,35 +524,35 @@ export default function App() {
               <input 
                 type="text" 
                 placeholder="Nama Lengkap & Gelar" 
-                value={profileForm.fullName} 
+                value={profileForm.fullName || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, fullName: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
               <input 
                 type="text" 
                 placeholder="NIP / NUPTK / ID Pegawai" 
-                value={profileForm.employeeId} 
+                value={profileForm.employeeId || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, employeeId: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
               <input 
                 type="text" 
                 placeholder="Jabatan" 
-                value={profileForm.position} 
+                value={profileForm.position || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, position: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
               <input 
                 type="text" 
                 placeholder="Nama Sekolah / Instansi" 
-                value={profileForm.schoolName} 
+                value={profileForm.schoolName || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, schoolName: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
               <input 
                 type="text" 
                 placeholder="Kota Penetapan Laporan" 
-                value={profileForm.signatureCity} 
+                value={profileForm.signatureCity || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, signatureCity: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
@@ -455,21 +567,21 @@ export default function App() {
               <input 
                 type="text" 
                 placeholder="Nama Lengkap Kasubbag TU & Gelar" 
-                value={profileForm.subbagName} 
+                value={profileForm.subbagName || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, subbagName: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
               <input 
                 type="text" 
                 placeholder="NIP Kasubbag TU" 
-                value={profileForm.subbagId} 
+                value={profileForm.subbagId || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, subbagId: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
               <input 
                 type="text" 
                 placeholder="Nama Jabatan" 
-                value={profileForm.subbagPosition} 
+                value={profileForm.subbagPosition || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, subbagPosition: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
@@ -484,21 +596,21 @@ export default function App() {
               <input 
                 type="text" 
                 placeholder="Nama Lengkap Kepala Sekolah & Gelar" 
-                value={profileForm.headmasterName} 
+                value={profileForm.headmasterName || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, headmasterName: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
               <input 
                 type="text" 
                 placeholder="NIP Kepala Sekolah" 
-                value={profileForm.headmasterId} 
+                value={profileForm.headmasterId || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, headmasterId: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
               <input 
                 type="text" 
                 placeholder="Nama Jabatan" 
-                value={profileForm.headmasterPosition} 
+                value={profileForm.headmasterPosition || ''} 
                 onChange={(e) => setProfileForm({ ...profileForm, headmasterPosition: e.target.value })}
                 className="w-full text-xs p-2 rounded-lg border border-slate-border" 
               />
@@ -508,7 +620,7 @@ export default function App() {
 
         {/* ==================== FORM: CATAT KEGIATAN ==================== */}
         {activeTab === 'form' && (
-          <div className="p-3.5 space-y-3 pb-20">
+          <div className="p-3.5 space-y-3 pb-24">
             {/* Tanggal */}
             <div className="bg-white p-3 rounded-xl border border-slate-borderLight shadow-sm">
               <label className="text-[11px] font-bold text-brand-orange block mb-1">Hari & Tanggal Pekerjaan</label>
@@ -526,7 +638,11 @@ export default function App() {
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-bold text-brand-orange">Uraian Kegiatan #{idx + 1}</span>
                   {tasks.length > 1 && !editingId && (
-                    <button onClick={() => setTasks(tasks.filter((_, i) => i !== idx))} className="text-red-600 p-1">
+                    <button
+                      type="button"
+                      onClick={() => setTasks(tasks.filter((_, i) => i !== idx))}
+                      className="text-red-600 p-1"
+                    >
                       <Trash2 size={14} />
                     </button>
                   )}
@@ -537,11 +653,14 @@ export default function App() {
                   placeholder="Contoh: Menginput data absensi guru/karyawan, mengarsipkan surat masuk dinas..."
                   value={task.description}
                   onChange={(e) => {
-                    const newT = [...tasks];
-                    newT[idx].description = e.target.value;
-                    setTasks(newT);
+                    const val = e.target.value;
+                    setTasks(prev => {
+                      const next = [...prev];
+                      next[idx] = { ...next[idx], description: val };
+                      return next;
+                    });
                   }}
-                  className="w-full text-xs p-2 border border-slate-border rounded-lg"
+                  className="w-full text-xs p-2 border border-slate-border rounded-lg focus:outline-none focus:border-brand-orange"
                 />
 
                 <span className="text-[11px] font-semibold text-slate-textMuted block">Bukti Dukung (Teks & Lampiran Foto):</span>
@@ -550,11 +669,14 @@ export default function App() {
                   placeholder="Tulis no. surat, link berkas drive, atau catatan bukti (opsional)"
                   value={task.evidenceText}
                   onChange={(e) => {
-                    const newT = [...tasks];
-                    newT[idx].evidenceText = e.target.value;
-                    setTasks(newT);
+                    const val = e.target.value;
+                    setTasks(prev => {
+                      const next = [...prev];
+                      next[idx] = { ...next[idx], evidenceText: val };
+                      return next;
+                    });
                   }}
-                  className="w-full text-xs p-2 border border-slate-border rounded-lg"
+                  className="w-full text-xs p-2 border border-slate-border rounded-lg focus:outline-none focus:border-brand-orange"
                 />
 
                 {/* Upload foto */}
@@ -562,10 +684,13 @@ export default function App() {
                   <div className="relative w-full h-32 rounded-lg overflow-hidden border border-slate-border">
                     <img src={task.evidenceImage} alt="Bukti" className="w-full h-full object-cover" />
                     <button 
+                      type="button"
                       onClick={() => {
-                        const newT = [...tasks];
-                        newT[idx].evidenceImage = null;
-                        setTasks(newT);
+                        setTasks(prev => {
+                          const next = [...prev];
+                          next[idx] = { ...next[idx], evidenceImage: null };
+                          return next;
+                        });
                       }}
                       className="absolute top-2 right-2 bg-black/60 text-white p-1 rounded-full"
                     >
@@ -582,7 +707,7 @@ export default function App() {
                         accept="image/*" 
                         capture="environment" 
                         className="hidden" 
-                        onChange={(e) => handleImageUpload(idx, e.target.files[0])} 
+                        onChange={(e) => handleImageUpload(idx, e.target.files?.[0])} 
                       />
                     </label>
                     <label className="flex-1 border border-slate-border rounded-lg p-2 flex items-center justify-center gap-1.5 text-xs text-slate-textSecondary cursor-pointer hover:bg-slate-50">
@@ -592,7 +717,7 @@ export default function App() {
                         type="file" 
                         accept="image/*" 
                         className="hidden" 
-                        onChange={(e) => handleImageUpload(idx, e.target.files[0])} 
+                        onChange={(e) => handleImageUpload(idx, e.target.files?.[0])} 
                       />
                     </label>
                   </div>
@@ -603,8 +728,9 @@ export default function App() {
             {/* Tambah tugas hari ini */}
             {!editingId && (
               <button 
-                onClick={() => setTasks([...tasks, { description: '', evidenceText: '', evidenceImage: null }])}
-                className="w-full border border-dashed border-brand-orange text-brand-orange font-bold text-xs py-2 rounded-lg flex items-center justify-center gap-1 hover:bg-orange-50"
+                type="button"
+                onClick={() => setTasks(prev => [...prev, { description: '', evidenceText: '', evidenceImage: null }])}
+                className="w-full border border-dashed border-brand-orange text-brand-orange font-bold text-xs py-2.5 rounded-lg flex items-center justify-center gap-1 hover:bg-orange-50"
               >
                 <Plus size={14} />
                 + Tambah Kegiatan Lain untuk Hari Ini
@@ -613,11 +739,15 @@ export default function App() {
 
             {/* Simpan Kegiatan */}
             <button 
+              type="button"
+              disabled={isSaving}
               onClick={handleSaveTasks}
-              className="w-full bg-brand-orange text-white font-bold text-sm py-2.5 rounded-xl flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition"
+              className="w-full bg-brand-orange text-white font-bold text-sm py-3 rounded-xl flex items-center justify-center gap-1.5 shadow-md active:scale-98 transition disabled:opacity-50"
             >
               <Check size={16} />
-              {editingId ? 'Perbarui Catatan' : `Simpan Semua Kegiatan (${tasks.length})`}
+              {isSaving
+                ? 'Menyimpan...'
+                : (editingId ? 'Perbarui Catatan' : `Simpan Semua Kegiatan (${tasks.length})`)}
             </button>
           </div>
         )}
@@ -626,9 +756,10 @@ export default function App() {
       {/* FLOATING ACTION BUTTON (Hanya di Home) */}
       {activeTab === 'home' && (
         <button 
+          type="button"
           onClick={() => {
             setEditingId(null);
-            setFormDate(new Date().toISOString().split('T')[0]);
+            setFormDate(getLocalDateString());
             setTasks([{ description: '', evidenceText: '', evidenceImage: null }]);
             setActiveTab('form');
           }}
@@ -642,6 +773,7 @@ export default function App() {
       {activeTab !== 'form' && (
         <nav className="bg-slate-surface border-t border-slate-borderLight flex items-center justify-around py-1.5 shrink-0 z-10">
           <button 
+            type="button"
             onClick={() => setActiveTab('home')}
             className={`flex flex-col items-center gap-0.5 py-1 px-4 rounded-xl transition ${
               activeTab === 'home' ? 'text-brand-dark font-bold' : 'text-slate-textSecondary'
@@ -654,6 +786,7 @@ export default function App() {
           </button>
 
           <button 
+            type="button"
             onClick={() => setActiveTab('report')}
             className={`flex flex-col items-center gap-0.5 py-1 px-4 rounded-xl transition ${
               activeTab === 'report' ? 'text-brand-dark font-bold' : 'text-slate-textSecondary'
@@ -666,6 +799,7 @@ export default function App() {
           </button>
 
           <button 
+            type="button"
             onClick={() => setActiveTab('profile')}
             className={`flex flex-col items-center gap-0.5 py-1 px-4 rounded-xl transition ${
               activeTab === 'profile' ? 'text-brand-dark font-bold' : 'text-slate-textSecondary'
@@ -682,4 +816,3 @@ export default function App() {
     </div>
   );
 }
-
