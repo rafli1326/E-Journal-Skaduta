@@ -1,68 +1,103 @@
-# E-Journal Android Application 📓🏢
+# E-Journal • SMKN 2 Tanjung 📓🏢
 
-**E-Journal** adalah aplikasi Android Native modern yang dirancang khusus untuk mencatat kegiatan pekerjaan sehari-hari di kantor/instansi secara *offline-first* dan menghasilkan berkas cetak (*print out*) bulanan berupa dokumen **PDF A4 terstruktur** lengkap dengan kop surat dan kolom pengesahan tanda tangan.
+**E-Journal** adalah aplikasi manajemen rekapitulasi pekerjaan harian dan pelaporan bulanan kedinasan yang dirancang khusus untuk memfasilitasi administrasi kerja staf Tata Usaha di lingkungan sekolah. Aplikasi ini beroperasi secara *offline-first* dengan jaminan privasi data tersimpan aman di perangkat masing-masing, serta menghasilkan berkas cetak **Laporan Bulanan PDF A4** berstandar tata naskah dinas resmi.
+
+Tersedia dalam dua varian terpadu: **Aplikasi Android Native** dan **Web Companion PWA (Progressive Web App)** untuk pengguna iPhone (iOS) maupun komputer.
 
 ---
 
 ## ✨ Fitur Utama
 
-1. **Pencatatan Jurnal Harian (Daily Work Log)**:
-   - Pemilihan Hari & Tanggal otomatis dengan kalender interaktif.
-   - Kolom isian uraian deskripsi kegiatan kerja harian.
-   - Lampiran bukti dukung fleksibel:
-     - **Teks**: tautan Google Drive/dokumen, nomor surat dinas, atau ringkasan hasil.
-     - **Foto/Media**: kamera langsung atau memilih dari galeri perangkat (tersimpan aman di penyimpanan internal aplikasi).
-   - Pencarian cepat (*real-time search*) dan filter catatan pekerjaan.
+### 1. 📝 Pencatatan Jurnal Harian (*Daily Work Log*)
+* **Multi-Tugas per Tanggal**: Memungkinkan pencatatan beberapa uraian kegiatan kerja sekaligus dalam satu tanggal yang sama.
+* **Kalender & Tanggal Fleksibel**: Pemilihan hari dan tanggal kerja dinamis dengan antarmuka kalender interaktif.
+* **Bukti Dukung Lengkap**:
+  * **Bukti Teks**: Nomor surat dinas, tautan berkas cloud, atau ringkasan hasil pekerjaan.
+  * **Bukti Foto Fisik**: Ambil foto langsung melalui kamera atau pilih dari galeri perangkat.
+* **Pencarian Cepat (*Instant Search*)**: Filter kegiatan harian secara *real-time* berdasarkan kata kunci tugas, tanggal, atau bukti dukung.
 
-2. **Ekspor & Cetak Laporan Bulanan (Monthly PDF Generator)**:
-   - Pemilihan periode Bulan & Tahun yang fleksibel.
-   - Otomatis meng-generate berkas PDF standar A4 (`595 x 842 pt`) dengan:
-     - **Kop Surat**: Judul laporan, periode bulan/tahun, dan data lengkap pegawai.
-     - **Tabel Rekapitulasi**: Kolom Nomor, Hari/Tanggal, Uraian Pekerjaan, dan Bukti Dukung (teks atau thumbnail gambar bukti kerja).
-     - **Kolom Pengesahan**: Kota & tanggal penetapan, tanda tangan Pegawai Yang Bersangkutan, dan tanda tangan Mengetahui Atasan Langsung beserta NIP/Jabatan.
-   - Tombol langsung untuk **Buka/Pratinjau PDF** dan **Bagikan** via WhatsApp, Email, atau Google Drive.
+### 2. 📄 Generator Laporan Bulanan PDF A4 Standar Dinas
+* **Tabel Rekapitulasi Terstruktur**: Pengelompokan rapi 1 baris per tanggal kerja dengan penomoran urut otomatis.
+* **Lembar Pengesahan Tanda Tangan 3 Pihak**:
+  1. Pegawai Yang Bersangkutan (Penyusun Laporan)
+  2. Memeriksa / Mengetahui: Kepala Sub Bagian Tata Usaha (Atasan Langsung)
+  3. Mengesahkan: Kepala Sekolah (Pimpinan Instansi)
+* **Lampiran Bukti Dokumentasi Foto Otomatis**:
+  * Jika ada kegiatan yang menyertakan foto, dokumen PDF secara otomatis menyertakan lembar khusus **"LAMPIRAN BUKTI DOKUMENTASI FOTO KEGIATAN"** setelah lembar tanda tangan.
+  * Foto ditampilkan dalam resolusi tinggi dengan bingkai kartu formal, badge tanggal, uraian kegiatan, dan keterangan bukti teks.
+* **Penomoran Halaman Seragam**: Tercetak nomor halaman resmi (`Hal. X dari Y`) di seluruh lembar PDF.
+* **Pratinjau & Berbagi Berkas**: Langsung tersimpan ke direktori Download perangkat dan siap dicetak atau dibagikan via WhatsApp, Email, dan Google Drive.
 
-3. **Profil Pegawai & Atasan**:
-   - Penyimpanan data Nama Lengkap, NIP/ID, Jabatan, Unit Kerja/Divisi.
-   - Data Atasan Langsung (Nama, NIP, Jabatan) dan Kota Penetapan.
-   - Terintegrasi otomatis ke setiap berkas PDF yang dicetak.
+### 3. 👤 Profil Pegawai & Pengesahan
+* Pengaturan data identitas staf penyusun laporan (Nama, NIP/NUPTK, Jabatan, Unit Kerja, Kota Penetapan).
+* Konfigurasi data pejabat atasan langsung (Kasubbag TU) dan pimpinan sekolah (Kepala Sekolah).
+* Pengaturan jadwal notifikasi pengingat harian.
 
-4. **Pengingat Harian (WorkManager Reminder)**:
-   - Notifikasi otomatis menjelang jam kepulangan kantor (dapat diatur jam dan menitnya).
-   - Pintar: Jika pengguna sudah mengisi jurnal pada hari tersebut, notifikasi tidak akan mengganggu.
+### 4. 🔄 Pembaruan Otomatis di Dalam Aplikasi (*In-App Auto-Updater*)
+* Terhubung langsung ke repositori resmi GitHub Releases.
+* **Tanpa Perlu Bongkar-Pasang**: Pembaruan dapat diunduh dan dipasang langsung di dalam aplikasi tanpa perlu melakukan *uninstall*.
+* **Data Aman**: Seluruh data catatan kegiatan di database lokal SQLite tetap tersimpan utuh saat pembaruan berlangsung.
 
-5. **Privasi & Offline-First**:
-   - Seluruh data tersimpan secara lokal di SQLite perangkat menggunakan Jetpack Room.
-   - Tidak memerlukan koneksi internet untuk bekerja.
-
----
-
-## 🛠️ Tech Stack & Arsitektur
-
-- **Bahasa**: Kotlin 2.2
-- **UI Framework**: Jetpack Compose dengan Material 3 Design
-- **Arsitektur**: MVVM (Model-View-ViewModel) + Clean Architecture
-- **Basis Data**: Room Database (SQLite) + Kotlin Coroutines & Flow
-- **Background Tasks**: Android Jetpack WorkManager
-- **PDF Engine**: Android Native `PdfDocument` & `StaticLayout` Table Drawing
-- **Image Loading**: Coil Compose
-- **Target SDK**: Android 15 (API 36) | **Min SDK**: Android 8.0 Oreo (API 26)
+### 5. 🛡️ Privasi & Keamanan Data (100% Client-Side)
+* **Tanpa Database Server Eksternal**: Seluruh data jurnal dan foto tersimpan lokal di memori HP/browser masing-masing.
+* **Sanitasi Gambar Otomatis**: Memverifikasi berkas media, membatasi resolusi untuk mencegah *decompression bomb*, serta menghapus metadata sensitif EXIF dan koordinat GPS.
+* **Bebas API Key & Kredensial**: Sistem tidak menggunakan layanan pihak ketiga berbayar yang rentan kebocoran kunci rahasia.
 
 ---
 
-## 🚀 Cara Menjalankan & Build
+## 📱 Akses & Pemasangan
 
-### 1. Buka di Android Studio
-Buka direktori ini di **Android Studio Ladybug** atau versi yang lebih baru. Gradle akan otomatis melakukan sinkronisasi.
+### A. Pengguna Android (Smartphone Android)
+Unduh file APK rilis resmi terbaru yang telah ditandatangani (*signed*):
+* 🔗 **[Unduh APK Resmi di GitHub Releases](https://github.com/rafli1326/E-Journal-Skaduta/releases)**
+* Pasang berkas `.apk` pada perangkat Android Anda (mendukung Android 8.0 Oreo hingga Android 15).
 
-### 2. Build Debug APK via Terminal
-```bash
-./gradlew assembleDebug
+### B. Pengguna iPhone (iOS Safari) & Desktop
+Gunakan versi Progressive Web App (PWA) tanpa perlu biaya langganan:
+* 🔗 **[Buka Web PWA E-Journal Skaduta](https://rafli1326.github.io/E-Journal-Skaduta/)**
+* **Cara pasang di iPhone**: Buka tautan di browser **Safari** $\rightarrow$ ketuk tombol **Share (Bagikan)** $\rightarrow$ pilih **"Tambah ke Layar Utama" (*Add to Home Screen*)**. Aplikasi akan langsung muncul di layar utama iPhone dan siap digunakan secara offline.
+
+---
+
+## 🛠️ Arsitektur & Teknologi
+
 ```
-Berkas APK akan berada di: `app/build/outputs/apk/debug/app-debug.apk`.
-
-### 3. Install langsung ke Device / Emulator
-```bash
-./gradlew installDebug
+                      E-Journal Skaduta
+                             │
+      ┌──────────────────────┴──────────────────────┐
+      ▼                                             ▼
+Android Native (app/)                        Web PWA (web/)
+• Kotlin 2.2 / JVM 17                        • React 18 + Vite
+• Jetpack Compose (Material 3)               • Tailwind CSS 3.4
+• SQLite Room Database 2.6                   • IndexedDB + LocalStorage Sync
+• Android Graphics PdfDocument               • jsPDF + jspdf-autotable
+• In-App GitHub Auto-Updater                 • Service Worker (Network-First)
+• Target: Android 15 (API 36)                • Hosting: GitHub Pages
 ```
 
+---
+
+## 💻 Panduan Pengembang (Build Lokal)
+
+### Menjalankan Modul Android
+1. Buka folder proyek ini di **Android Studio Ladybug** atau versi yang lebih baru.
+2. Build APK rilis produksi:
+   ```bash
+   ./gradlew assembleRelease
+   ```
+   Berkas APK hasil build berada di: `app/build/outputs/apk/release/app-release.apk`.
+
+### Menjalankan Modul Web PWA
+1. Masuk ke direktori web:
+   ```bash
+   cd web
+   ```
+2. Pasang dependensi dan jalankan server pengembangan:
+   ```bash
+   npm install
+   npm run dev
+   ```
+3. Build bundel produksi:
+   ```bash
+   npm run build
+   ```
