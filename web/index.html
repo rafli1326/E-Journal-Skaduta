@@ -18,11 +18,11 @@
     <div id="root"></div>
     <script type="module" src="./src/main.jsx"></script>
     <script>
-      // Bersihkan cache Service Worker lama (v1/v2) agar tidak menyajikan script usang
+      // Bersihkan cache Service Worker lama agar tidak menyajikan script usang
       if ('caches' in window) {
         caches.keys().then((keys) => {
           keys.forEach((key) => {
-            if (key !== 'ejournal-skaduta-v4') {
+            if (key !== 'ejournal-skaduta-v5') {
               caches.delete(key);
             }
           });

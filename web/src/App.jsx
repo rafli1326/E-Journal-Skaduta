@@ -306,7 +306,7 @@ export default function App() {
             <h1 className="text-sm font-bold text-slate-textPrimary leading-tight">
               {activeTab === 'form' 
                 ? (editingId ? 'Ubah Kegiatan' : 'Catat Kegiatan')
-                : (activeTab === 'report' ? 'Laporan Bulanan' : (activeTab === 'profile' ? 'Profil & Pengesahan' : 'E-Journal • SMKN 2 Tanjung'))}
+                : (activeTab === 'report' ? 'Laporan Bulanan' : (activeTab === 'profile' ? 'Profil & Pengesahan' : 'E-Journal'))}
             </h1>
             {activeTab === 'home' && (
               <p className="text-[11px] font-semibold text-brand-orange leading-none">SMK Negeri 2 Tanjung</p>

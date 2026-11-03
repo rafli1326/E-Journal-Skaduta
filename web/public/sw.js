@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ejournal-skaduta-v4';
+const CACHE_NAME = 'ejournal-skaduta-v5';
 const ASSETS = [
   './',
   './index.html',
