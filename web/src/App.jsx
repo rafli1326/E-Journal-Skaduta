@@ -107,28 +107,35 @@ export default function App() {
       return;
     }
 
-    const dateObj = new Date(formDate + 'T12:00:00');
-    const dateMillis = dateObj.getTime();
-    const dayOfWeek = getDayOfWeek(dateMillis);
-    const formattedDate = formatDate(dateMillis);
+    try {
+      const parts = formDate.split('-');
+      const dateObj = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+      const dateMillis = dateObj.getTime();
+      const dayOfWeek = getDayOfWeek(dateMillis);
+      const formattedDate = formatDate(dateMillis);
 
-    for (const t of validTasks) {
-      await saveEntry({
-        id: editingId || undefined,
-        dateMillis,
-        dayOfWeek,
-        formattedDate,
-        description: t.description.trim(),
-        evidenceType: 'COMBINED',
-        evidenceText: t.evidenceText.trim() || null,
-        evidenceImage: t.evidenceImage || null,
-        updatedAt: Date.now()
-      });
+      for (const t of validTasks) {
+        await saveEntry({
+          id: editingId ? Number(editingId) : undefined,
+          dateMillis,
+          dayOfWeek,
+          formattedDate,
+          description: t.description.trim(),
+          evidenceType: 'COMBINED',
+          evidenceText: t.evidenceText.trim() || null,
+          evidenceImage: t.evidenceImage || null,
+          updatedAt: Date.now()
+        });
+      }
+
+      await loadData();
+      setActiveTab('home');
+      setEditingId(null);
+      setTasks([{ description: '', evidenceText: '', evidenceImage: null }]);
+    } catch (err) {
+      console.error("Gagal menyimpan kegiatan:", err);
+      alert("Terjadi kesalahan saat menyimpan: " + err.message);
     }
-
-    await loadData();
-    setActiveTab('home');
-    setEditingId(null);
   }
 
   // Handle Photo input
