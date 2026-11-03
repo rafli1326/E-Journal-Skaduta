@@ -9,8 +9,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -20,6 +23,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
+import com.ejournal.skaduta.ui.components.AppUpdateDialog
 import com.ejournal.skaduta.ui.theme.BrandOrangeContainer
 import com.ejournal.skaduta.ui.theme.BrandOrangeDark
 import com.ejournal.skaduta.ui.theme.SlateTextSecondary
@@ -31,10 +35,36 @@ import com.ejournal.skaduta.ui.screens.profile.ProfileScreen
 import com.ejournal.skaduta.ui.screens.profile.ProfileViewModel
 import com.ejournal.skaduta.ui.screens.report.MonthlyReportScreen
 import com.ejournal.skaduta.ui.screens.report.MonthlyReportViewModel
+import com.ejournal.skaduta.util.AppUpdateManager
 
 @Composable
 fun MainAppNavigation() {
+    val context = LocalContext.current
     val navController = rememberNavController()
+
+    val showUpdateDialog by AppUpdateManager.showUpdateDialog.collectAsState()
+    val updateInfo by AppUpdateManager.updateInfo.collectAsState()
+    val isDownloading by AppUpdateManager.isDownloading.collectAsState()
+    val downloadProgress by AppUpdateManager.downloadProgress.collectAsState()
+
+    // Otomatis periksa pembaruan dari GitHub Releases di latar belakang saat aplikasi dibuka
+    LaunchedEffect(Unit) {
+        AppUpdateManager.checkForUpdate(context, isManual = false)
+    }
+
+    if (showUpdateDialog && updateInfo != null) {
+        AppUpdateDialog(
+            updateInfo = updateInfo!!,
+            isDownloading = isDownloading,
+            downloadProgress = downloadProgress,
+            onConfirmUpdate = {
+                AppUpdateManager.downloadAndInstall(context, updateInfo!!)
+            },
+            onDismiss = {
+                AppUpdateManager.dismissUpdateDialog()
+            }
+        )
+    }
 
     val bottomNavItems = listOf(
         Screen.Home,

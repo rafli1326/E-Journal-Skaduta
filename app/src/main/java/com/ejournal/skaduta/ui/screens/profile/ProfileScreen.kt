@@ -5,6 +5,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,6 +28,8 @@ import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.SupervisorAccount
+import androidx.compose.material.icons.filled.SystemUpdate
+import com.ejournal.skaduta.util.AppUpdateManager
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -463,6 +466,92 @@ fun ProfileScreen(
                             )
                         }
                     }
+                }
+            }
+
+            // Card 5: Versi & Pembaruan Aplikasi (Auto-Update GitHub Releases)
+            val isCheckingUpdate by AppUpdateManager.isChecking.collectAsState()
+            val currentAppVersion = remember { AppUpdateManager.getCurrentVersionName(context) }
+            val statusMsg by AppUpdateManager.statusMessage.collectAsState()
+
+            LaunchedEffect(statusMsg) {
+                statusMsg?.let {
+                    snackbarHostState.showSnackbar(it)
+                    AppUpdateManager.clearStatusMessage()
+                }
+            }
+
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(androidx.compose.foundation.shape.CircleShape)
+                                    .background(BrandOrangeContainer),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.SystemUpdate,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = "Pembaruan Aplikasi",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                                Text(
+                                    text = "Versi $currentAppVersion",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = SlateTextSecondary
+                                )
+                            }
+                        }
+
+                        Button(
+                            onClick = { AppUpdateManager.checkForUpdate(context, isManual = true) },
+                            enabled = !isCheckingUpdate,
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) {
+                            if (isCheckingUpdate) {
+                                androidx.compose.material3.CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                    color = Color.White
+                                )
+                            } else {
+                                Text("Periksa", fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Aplikasi ini terhubung ke GitHub Release resmi untuk pembaruan langsung otomatis tanpa perlu bongkar-pasang aplikasi.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = SlateTextSecondary
+                    )
                 }
             }
         }
