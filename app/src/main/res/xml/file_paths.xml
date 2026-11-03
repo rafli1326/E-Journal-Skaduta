@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Hanya folder yang memang perlu dibagikan; jangan ekspos seluruh direktori internal -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <files-path name="reports" path="generated_reports/" />
+    <cache-path name="camera" path="camera_images/" />
+</paths>

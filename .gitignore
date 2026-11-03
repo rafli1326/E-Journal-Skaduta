@@ -1,0 +1,24 @@
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.ap_
+*.aab
+/keystore/
+*.jks
+*.keystore
+keystore.properties
+
+# Web & Node
+node_modules/
+/web/dist/
+/web/node_modules/
+.env*
+build/
+app/build/
