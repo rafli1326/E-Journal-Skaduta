@@ -22,3 +22,6 @@ node_modules/
 .env*
 build/
 app/build/
+
+# Private Documentation
+documentation.md
