@@ -22,7 +22,7 @@
       if ('caches' in window) {
         caches.keys().then((keys) => {
           keys.forEach((key) => {
-            if (key !== 'ejournal-skaduta-v5') {
+            if (key !== 'ejournal-skaduta-v6') {
               caches.delete(key);
             }
           });
