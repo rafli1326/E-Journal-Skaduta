@@ -55,6 +55,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -63,6 +64,7 @@ import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.ejournal.skaduta.R
 import com.ejournal.skaduta.data.local.entity.JournalEntry
+import com.ejournal.skaduta.util.FileUtils
 import com.ejournal.skaduta.ui.theme.ActionBlue
 import com.ejournal.skaduta.ui.theme.ActionRed
 import com.ejournal.skaduta.ui.theme.BrandOrange
@@ -488,33 +490,39 @@ fun CleanDayCard(
                                     }
 
                                     // Photo Evidence
-                                    if (!task.evidenceImagePath.isNullOrBlank()) {
-                                        val imgFile = remember(task.evidenceImagePath) { File(task.evidenceImagePath) }
-                                        if (imgFile.exists()) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(6.dp))
-                                                    .background(SlateTealContainer.copy(alpha = 0.5f))
-                                                    .border(0.5.dp, SlateTealDark.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
-                                                    .padding(horizontal = 6.dp, vertical = 3.dp)
-                                            ) {
-                                                AsyncImage(
-                                                    model = imgFile,
-                                                    contentDescription = "Bukti Foto",
-                                                    modifier = Modifier
-                                                        .size(26.dp)
-                                                        .clip(RoundedCornerShape(4.dp)),
-                                                    contentScale = ContentScale.Crop
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
-                                                Text(
-                                                    text = "Foto Bukti Terlampir",
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = SlateTealOnContainer
-                                                )
+                                    val context = LocalContext.current
+                                    val imagePaths = remember(task.evidenceImagePath) { task.getEvidenceImagePaths() }
+                                    if (imagePaths.isNotEmpty()) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(6.dp))
+                                                .background(SlateTealContainer.copy(alpha = 0.5f))
+                                                .border(0.5.dp, SlateTealDark.copy(alpha = 0.2f), RoundedCornerShape(6.dp))
+                                                .padding(horizontal = 6.dp, vertical = 3.dp)
+                                        ) {
+                                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                imagePaths.take(3).forEach { p ->
+                                                    val imgFile = remember(p) { File(p) }
+                                                    if (imgFile.exists() && FileUtils.isSafeEvidenceFile(context, imgFile)) {
+                                                        AsyncImage(
+                                                            model = imgFile,
+                                                            contentDescription = "Bukti Foto",
+                                                            modifier = Modifier
+                                                                .size(26.dp)
+                                                                .clip(RoundedCornerShape(4.dp)),
+                                                            contentScale = ContentScale.Crop
+                                                        )
+                                                    }
+                                                }
                                             }
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text(
+                                                text = if (imagePaths.size > 1) "${imagePaths.size} Foto Terlampir" else "Foto Bukti Terlampir",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                fontWeight = FontWeight.Bold,
+                                                color = SlateTealOnContainer
+                                            )
                                         }
                                     }
                                 }

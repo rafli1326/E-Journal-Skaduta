@@ -5,7 +5,8 @@ import {
   saveProfile as saveProfileDb, 
   saveEntry, 
   deleteEntry as deleteEntryDb, 
-  getEntriesByMonth 
+  getEntriesByMonth,
+  isSafeImageDataUrl
 } from './db';
 import { 
   formatDate, 
@@ -38,15 +39,44 @@ function getLocalDateString(millis = Date.now()) {
   return `${year}-${month}-${day}`;
 }
 
+const ALLOWED_IMAGE_MIMES = ['image/jpeg', 'image/png', 'image/webp'];
+const MAX_IMAGE_DIMENSION = 12000;
+const MAX_IMAGE_PIXELS = 50_000_000;
+const MAX_DESC_LENGTH = 2000;
+const MAX_EVIDENCE_TEXT_LENGTH = 500;
+const MAX_TASKS_PER_BATCH = 25;
+const MAX_PHOTOS_PER_TASK = 10;
+
 function compressImageFile(file, maxDim = 1024, quality = 0.75) {
   return new Promise((resolve) => {
+    // Security: validasi tipe MIME gambar (tolak SVG/HTML/script)
+    if (!file || !ALLOWED_IMAGE_MIMES.includes(file.type)) {
+      resolve(null);
+      return;
+    }
+
     const reader = new FileReader();
     reader.onload = (e) => {
       const dataUrl = e.target.result;
+      if (typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/')) {
+        resolve(null);
+        return;
+      }
       const img = new Image();
       img.onload = () => {
         try {
           let { width, height } = img;
+          // Security: cegah Decompression Bomb
+          if (
+            width <= 0 ||
+            height <= 0 ||
+            width > MAX_IMAGE_DIMENSION ||
+            height > MAX_IMAGE_DIMENSION ||
+            width * height > MAX_IMAGE_PIXELS
+          ) {
+            resolve(null);
+            return;
+          }
           if (width > maxDim || height > maxDim) {
             if (width >= height) {
               height = Math.round((height * maxDim) / width);
@@ -60,14 +90,20 @@ function compressImageFile(file, maxDim = 1024, quality = 0.75) {
           canvas.width = width;
           canvas.height = height;
           const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(null);
+            return;
+          }
           ctx.drawImage(img, 0, 0, width, height);
+          // Re-encode paksa ke JPEG bersih (menghapus metadata EXIF/payload tersembunyi)
           const compressed = canvas.toDataURL('image/jpeg', quality);
-          resolve(compressed || dataUrl);
+          resolve(isSafeImageDataUrl(compressed) ? compressed : null);
         } catch {
-          resolve(dataUrl);
+          resolve(null);
         }
       };
-      img.onerror = () => resolve(dataUrl);
+      // Security: jangan pernah fallback ke raw dataUrl jika gagal decode gambar
+      img.onerror = () => resolve(null);
       img.src = dataUrl;
     };
     reader.onerror = () => resolve(null);
@@ -85,11 +121,12 @@ export default function App() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [monthlyEntries, setMonthlyEntries] = useState([]);
+  const [includePhotoAppendix, setIncludePhotoAppendix] = useState(true);
 
   // Form state (Add/Edit)
   const [editingId, setEditingId] = useState(null);
   const [formDate, setFormDate] = useState(getLocalDateString());
-  const [tasks, setTasks] = useState([{ description: '', evidenceText: '', evidenceImage: null }]);
+  const [tasks, setTasks] = useState([{ description: '', evidenceText: '', evidenceImages: [] }]);
   const [isSaving, setIsSaving] = useState(false);
 
   // Profile Form state
@@ -193,15 +230,20 @@ export default function App() {
 
       const savedItems = [];
       for (const t of validTasks) {
+        const images = (t.evidenceImages && Array.isArray(t.evidenceImages) && t.evidenceImages.length > 0)
+          ? t.evidenceImages
+          : (t.evidenceImage ? [t.evidenceImage] : []);
+
         const saved = await saveEntry({
           id: editingId ? Number(editingId) : undefined,
           dateMillis,
           dayOfWeek,
           formattedDate,
           description: (t.description || '').trim(),
-          evidenceType: 'COMBINED',
+          evidenceType: images.length > 0 ? 'IMAGE' : (t.evidenceText ? 'TEXT' : 'COMBINED'),
           evidenceText: (t.evidenceText || '').trim() || null,
-          evidenceImage: t.evidenceImage || null,
+          evidenceImage: images[0] || null,
+          evidenceImages: images,
           updatedAt: Date.now()
         });
         if (saved) savedItems.push(saved);
@@ -219,7 +261,7 @@ export default function App() {
 
       await loadData();
       setEditingId(null);
-      setTasks([{ description: '', evidenceText: '', evidenceImage: null }]);
+      setTasks([{ description: '', evidenceText: '', evidenceImages: [] }]);
       setActiveTab('home');
       showToast('Catatan kegiatan berhasil disimpan!');
     } catch (err) {
@@ -230,21 +272,62 @@ export default function App() {
     }
   }
 
-  // Handle Photo input
-  async function handleImageUpload(index, file) {
-    if (!file) return;
-    if (file.size > 20 * 1024 * 1024) {
-      alert('Ukuran foto terlalu besar (maksimal 20 MB).');
+  // Handle Photo input (Multiple files support)
+  async function handleImageUpload(index, fileList) {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+    const existing = tasks[index]?.evidenceImages || (tasks[index]?.evidenceImage ? [tasks[index].evidenceImage] : []);
+    if (existing.length + files.length > 10) {
+      alert('Maksimal 10 foto per kegiatan.');
       return;
     }
-    const compressedDataUrl = await compressImageFile(file, 1024, 0.75);
-    if (compressedDataUrl) {
+
+    const compressedList = [];
+    for (const file of files) {
+      if (!ALLOWED_IMAGE_MIMES.includes(file.type)) {
+        alert(`Format berkas "${file.name}" tidak didukung (gunakan JPG, PNG, atau WEBP).`);
+        continue;
+      }
+      if (file.size > 20 * 1024 * 1024) {
+        alert(`Ukuran foto "${file.name}" terlalu besar (maksimal 20 MB).`);
+        continue;
+      }
+      const compressedDataUrl = await compressImageFile(file, 1024, 0.75);
+      if (compressedDataUrl) {
+        compressedList.push(compressedDataUrl);
+      } else {
+        alert(`Berkas "${file.name}" tidak valid atau rusak.`);
+      }
+    }
+
+    if (compressedList.length > 0) {
       setTasks(prev => {
         const next = [...prev];
-        next[index] = { ...next[index], evidenceImage: compressedDataUrl };
+        const current = next[index].evidenceImages || (next[index].evidenceImage ? [next[index].evidenceImage] : []);
+        const updated = [...current, ...compressedList];
+        next[index] = {
+          ...next[index],
+          evidenceImages: updated,
+          evidenceImage: updated[0] || null
+        };
         return next;
       });
     }
+  }
+
+  // Hapus foto spesifik dari kegiatan
+  function handleRemoveImage(taskIdx, imgIdx) {
+    setTasks(prev => {
+      const next = [...prev];
+      const current = next[taskIdx].evidenceImages || (next[taskIdx].evidenceImage ? [next[taskIdx].evidenceImage] : []);
+      const updated = current.filter((_, i) => i !== imgIdx);
+      next[taskIdx] = {
+        ...next[taskIdx],
+        evidenceImages: updated,
+        evidenceImage: updated[0] || null
+      };
+      return next;
+    });
   }
 
   // Delete Entry
@@ -261,10 +344,13 @@ export default function App() {
   function handleOpenEdit(entry) {
     setEditingId(entry.id);
     setFormDate(getLocalDateString(entry.dateMillis || Date.now()));
+    const images = (entry.evidenceImages && Array.isArray(entry.evidenceImages) && entry.evidenceImages.length > 0)
+      ? entry.evidenceImages
+      : (entry.evidenceImage ? [entry.evidenceImage] : []);
     setTasks([{
       description: entry.description || '',
       evidenceText: entry.evidenceText || '',
-      evidenceImage: entry.evidenceImage || null
+      evidenceImages: images
     }]);
     setActiveTab('form');
   }
@@ -343,9 +429,10 @@ export default function App() {
               <Search className="absolute left-3 top-2.5 text-brand-orange" size={18} />
               <input 
                 type="text"
+                maxLength={100}
                 placeholder="Cari kegiatan..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => setSearchQuery(e.target.value.slice(0, 100))}
                 className="w-full bg-white border border-slate-border text-sm rounded-xl pl-9 pr-3 py-2 text-slate-textPrimary placeholder-slate-textMuted focus:outline-none focus:border-brand-orange"
               />
             </div>
@@ -390,11 +477,25 @@ export default function App() {
                                 📎 {task.evidenceText}
                               </p>
                             )}
-                            {task.evidenceImage && (
-                              <div className="mt-1.5">
-                                <img src={task.evidenceImage} alt="Bukti" className="w-16 h-16 object-cover rounded-md border border-slate-borderLight" />
-                              </div>
-                            )}
+                            {(() => {
+                              const rawImages = (task.evidenceImages && Array.isArray(task.evidenceImages) && task.evidenceImages.length > 0)
+                                ? task.evidenceImages
+                                : (task.evidenceImage ? [task.evidenceImage] : []);
+                              const images = rawImages.filter(isSafeImageDataUrl);
+                              if (images.length === 0) return null;
+                              return (
+                                <div className="mt-1.5 flex items-center gap-1.5 overflow-x-auto py-0.5">
+                                  {images.map((img, iIdx) => (
+                                    <img key={iIdx} src={img} alt={`Bukti ${iIdx + 1}`} className="w-14 h-14 object-cover rounded-md border border-slate-borderLight shrink-0" />
+                                  ))}
+                                  {images.length > 1 && (
+                                    <span className="text-[10px] font-bold text-slate-textMuted shrink-0">
+                                      ({images.length} Foto)
+                                    </span>
+                                  )}
+                                </div>
+                              );
+                            })()}
                           </div>
                           <div className="flex items-start gap-1 shrink-0">
                             <button type="button" onClick={() => handleOpenEdit(task)} className="p-1.5 text-blue-600 hover:bg-blue-50 rounded">
@@ -461,10 +562,27 @@ export default function App() {
                   <p className="text-[11px] text-slate-textSecondary">Format tabel rapi dengan Kop & Lembar Tanda Tangan</p>
                 </div>
               </div>
+
+              {/* Opsi Lampirkan Lembar Khusus Foto */}
+              <label className="flex items-center justify-between bg-white/90 p-2.5 rounded-lg border border-slate-border mb-3 cursor-pointer select-none">
+                <div className="pr-2">
+                  <span className="text-xs font-bold text-slate-textPrimary block">Lampirkan Lembar Khusus Foto</span>
+                  <span className="text-[10px] text-slate-textSecondary block">Sertakan halaman dokumentasi foto kegiatan di akhir PDF</span>
+                </div>
+                <input 
+                  type="checkbox"
+                  checked={includePhotoAppendix}
+                  onChange={(e) => setIncludePhotoAppendix(e.target.checked)}
+                  className="w-4 h-4 text-brand-orange rounded border-slate-300 focus:ring-brand-orange accent-brand-orange cursor-pointer"
+                />
+              </label>
+
               <button 
                 type="button"
                 disabled={monthlyEntries.length === 0}
-                onClick={() => generateReportPdf(monthlyEntries, profile, selectedMonth, selectedYear)}
+                onClick={async () => {
+                  await generateReportPdf(monthlyEntries, profile, selectedMonth, selectedYear, { includePhotoAppendix });
+                }}
                 className="w-full bg-brand-orange disabled:opacity-50 text-white font-bold text-sm py-2.5 rounded-lg flex items-center justify-center gap-2 shadow-sm active:scale-98 transition"
               >
                 <FileText size={16} />
@@ -639,10 +757,11 @@ export default function App() {
 
                 <textarea 
                   rows={3} 
+                  maxLength={MAX_DESC_LENGTH}
                   placeholder="Contoh: Menginput data absensi guru/karyawan, mengarsipkan surat masuk dinas..."
                   value={task.description}
                   onChange={(e) => {
-                    const val = e.target.value;
+                    const val = e.target.value.slice(0, MAX_DESC_LENGTH);
                     setTasks(prev => {
                       const next = [...prev];
                       next[idx] = { ...next[idx], description: val };
@@ -655,10 +774,11 @@ export default function App() {
                 <span className="text-[11px] font-semibold text-slate-textMuted block">Bukti Dukung (Teks & Lampiran Foto):</span>
                 <input 
                   type="text"
+                  maxLength={MAX_EVIDENCE_TEXT_LENGTH}
                   placeholder="Tulis no. surat, link berkas drive, atau catatan bukti (opsional)"
                   value={task.evidenceText}
                   onChange={(e) => {
-                    const val = e.target.value;
+                    const val = e.target.value.slice(0, MAX_EVIDENCE_TEXT_LENGTH);
                     setTasks(prev => {
                       const next = [...prev];
                       next[idx] = { ...next[idx], evidenceText: val };
@@ -668,49 +788,68 @@ export default function App() {
                   className="w-full text-xs p-2 border border-slate-border rounded-lg focus:outline-none focus:border-brand-orange"
                 />
 
-                {/* Upload foto */}
-                {task.evidenceImage ? (
-                  <div className="relative w-full h-32 rounded-lg overflow-hidden border border-slate-border">
-                    <img src={task.evidenceImage} alt="Bukti" className="w-full h-full object-cover" />
-                    <button 
-                      type="button"
-                      onClick={() => {
-                        setTasks(prev => {
-                          const next = [...prev];
-                          next[idx] = { ...next[idx], evidenceImage: null };
-                          return next;
-                        });
-                      }}
-                      className="absolute top-2 right-2 bg-black/60 text-white p-1 rounded-full"
-                    >
-                      <X size={14} />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex gap-2">
-                    <label className="flex-1 border border-slate-border rounded-lg p-2 flex items-center justify-center gap-1.5 text-xs text-slate-textSecondary cursor-pointer hover:bg-slate-50">
-                      <Camera size={14} />
-                      Ambil Foto
-                      <input 
-                        type="file" 
-                        accept="image/*" 
-                        capture="environment" 
-                        className="hidden" 
-                        onChange={(e) => handleImageUpload(idx, e.target.files?.[0])} 
-                      />
-                    </label>
-                    <label className="flex-1 border border-slate-border rounded-lg p-2 flex items-center justify-center gap-1.5 text-xs text-slate-textSecondary cursor-pointer hover:bg-slate-50">
-                      <ImageIcon size={14} />
-                      Pilih Galeri
-                      <input 
-                        type="file" 
-                        accept="image/*" 
-                        className="hidden" 
-                        onChange={(e) => handleImageUpload(idx, e.target.files?.[0])} 
-                      />
-                    </label>
-                  </div>
-                )}
+                {/* Upload foto (Bisa Lebih dari 1 Foto) */}
+                {(() => {
+                  const rawImages = (task.evidenceImages && Array.isArray(task.evidenceImages) && task.evidenceImages.length > 0)
+                    ? task.evidenceImages
+                    : (task.evidenceImage ? [task.evidenceImage] : []);
+                  const currentImages = rawImages.filter(isSafeImageDataUrl);
+                  return (
+                    <div className="space-y-2">
+                      {currentImages.length > 0 && (
+                        <div className="flex gap-2 overflow-x-auto py-1">
+                          {currentImages.map((img, imgIdx) => (
+                            <div key={imgIdx} className="relative w-20 h-20 rounded-lg overflow-hidden border border-slate-border shrink-0">
+                              <img src={img} alt={`Bukti ${imgIdx + 1}`} className="w-full h-full object-cover" />
+                              <button 
+                                type="button"
+                                onClick={() => handleRemoveImage(idx, imgIdx)}
+                                className="absolute top-1 right-1 bg-black/70 text-white p-1 rounded-full hover:bg-black"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      <div className="flex gap-2">
+                        <label className="flex-1 border border-slate-border rounded-lg p-2 flex items-center justify-center gap-1.5 text-xs text-slate-textSecondary cursor-pointer hover:bg-slate-50">
+                          <Camera size={14} />
+                          {currentImages.length > 0 ? '+ Kamera' : 'Ambil Foto'}
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            capture="environment" 
+                            className="hidden" 
+                            onChange={(e) => {
+                              if (e.target.files) {
+                                handleImageUpload(idx, e.target.files);
+                                e.target.value = '';
+                              }
+                            }} 
+                          />
+                        </label>
+                        <label className="flex-1 border border-slate-border rounded-lg p-2 flex items-center justify-center gap-1.5 text-xs text-slate-textSecondary cursor-pointer hover:bg-slate-50">
+                          <ImageIcon size={14} />
+                          {currentImages.length > 0 ? '+ Galeri' : 'Pilih Galeri'}
+                          <input 
+                            type="file" 
+                            accept="image/*" 
+                            multiple
+                            className="hidden" 
+                            onChange={(e) => {
+                              if (e.target.files) {
+                                handleImageUpload(idx, e.target.files);
+                                e.target.value = '';
+                              }
+                            }} 
+                          />
+                        </label>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             ))}
 
@@ -718,7 +857,13 @@ export default function App() {
             {!editingId && (
               <button 
                 type="button"
-                onClick={() => setTasks(prev => [...prev, { description: '', evidenceText: '', evidenceImage: null }])}
+                onClick={() => {
+                  if (tasks.length >= MAX_TASKS_PER_BATCH) {
+                    alert(`Maksimal ${MAX_TASKS_PER_BATCH} kegiatan sekaligus.`);
+                    return;
+                  }
+                  setTasks(prev => [...prev, { description: '', evidenceText: '', evidenceImages: [] }]);
+                }}
                 className="w-full border border-dashed border-brand-orange text-brand-orange font-bold text-xs py-2.5 rounded-lg flex items-center justify-center gap-1 hover:bg-orange-50"
               >
                 <Plus size={14} />
@@ -749,7 +894,7 @@ export default function App() {
           onClick={() => {
             setEditingId(null);
             setFormDate(getLocalDateString());
-            setTasks([{ description: '', evidenceText: '', evidenceImage: null }]);
+            setTasks([{ description: '', evidenceText: '', evidenceImages: [] }]);
             setActiveTab('form');
           }}
           className="fixed bottom-16 right-4 sm:right-[calc(50%-200px)] w-12 h-12 rounded-2xl bg-brand-orange text-white shadow-lg flex items-center justify-center active:scale-95 transition z-20"

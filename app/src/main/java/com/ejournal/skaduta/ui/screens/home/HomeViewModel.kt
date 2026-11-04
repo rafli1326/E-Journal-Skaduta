@@ -56,11 +56,13 @@ class HomeViewModel(application: Application) : AndroidViewModel(application) {
 
     fun deleteEntry(entry: JournalEntry) {
         viewModelScope.launch {
-            val imagePath = entry.evidenceImagePath
+            val imagePaths = entry.getEvidenceImagePaths()
             repository.deleteEntry(entry)
-            if (!imagePath.isNullOrBlank()) {
+            if (imagePaths.isNotEmpty()) {
                 withContext(Dispatchers.IO) {
-                    FileUtils.deleteEvidenceFile(getApplication(), imagePath)
+                    imagePaths.forEach { p ->
+                        FileUtils.deleteEvidenceFile(getApplication(), p)
+                    }
                 }
             }
         }

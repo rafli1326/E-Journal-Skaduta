@@ -43,6 +43,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -76,6 +78,7 @@ fun MonthlyReportScreen(
     val monthlyEntries by viewModel.monthlyEntries.collectAsState()
     val profile by viewModel.profile.collectAsState()
     val isGenerating by viewModel.isGenerating.collectAsState()
+    val includePhotoAppendix by viewModel.includePhotoAppendix.collectAsState()
     val generatedPdfFile by viewModel.generatedPdfFile.collectAsState()
     val errorMessage by viewModel.errorMessage.collectAsState()
 
@@ -216,6 +219,40 @@ fun MonthlyReportScreen(
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                             }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f))
+                                .padding(horizontal = 12.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Lampirkan Lembar Khusus Foto",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = SlateTextPrimary
+                                )
+                                Text(
+                                    text = "Sertakan halaman dokumentasi foto di akhir PDF",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = SlateTextSecondary
+                                )
+                            }
+                            Switch(
+                                checked = includePhotoAppendix,
+                                onCheckedChange = { viewModel.setIncludePhotoAppendix(it) },
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = MaterialTheme.colorScheme.primary,
+                                    checkedTrackColor = MaterialTheme.colorScheme.primaryContainer
+                                )
+                            )
                         }
 
                         Spacer(modifier = Modifier.height(10.dp))

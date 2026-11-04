@@ -2,6 +2,8 @@
 <html lang="id">
   <head>
     <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self';" />
+    <meta name="referrer" content="no-referrer" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <title>E-Journal • SMKN 2 Tanjung</title>
     
@@ -17,27 +19,5 @@
   <body class="bg-[#F8FAFC] text-[#0F172A] antialiased">
     <div id="root"></div>
     <script type="module" src="./src/main.jsx"></script>
-    <script>
-      // Bersihkan cache Service Worker lama agar tidak menyajikan script usang
-      if ('caches' in window) {
-        caches.keys().then((keys) => {
-          keys.forEach((key) => {
-            if (key !== 'ejournal-skaduta-v6') {
-              caches.delete(key);
-            }
-          });
-        }).catch(() => {});
-      }
-
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('./sw.js', { updateViaCache: 'none' })
-            .then((reg) => {
-              reg.update().catch(() => {});
-            })
-            .catch(() => {});
-        });
-      }
-    </script>
   </body>
 </html>

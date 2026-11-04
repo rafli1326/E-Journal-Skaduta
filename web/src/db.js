@@ -142,8 +142,37 @@ export async function getProfile() {
   return defaultProfile;
 }
 
+export function isSafeImageDataUrl(str) {
+  return (
+    typeof str === 'string' &&
+    str.length <= 8 * 1024 * 1024 &&
+    /^data:image\/(jpeg|jpg|png|webp);base64,[A-Za-z0-9+/=]+$/i.test(str)
+  );
+}
+
 export async function saveProfile(profile) {
-  const data = { ...defaultProfile, ...profile, id: 1 };
+  const safeStr = (val, maxLen, fallback = '') =>
+    typeof val === 'string' ? val.trim().slice(0, maxLen) || fallback : fallback;
+
+  const data = {
+    ...defaultProfile,
+    fullName: safeStr(profile?.fullName, 150, ''),
+    employeeId: safeStr(profile?.employeeId, 50, ''),
+    position: safeStr(profile?.position, 150, defaultProfile.position),
+    schoolName: safeStr(profile?.schoolName, 150, defaultProfile.schoolName),
+    department: safeStr(profile?.department, 150, defaultProfile.department),
+    signatureCity: safeStr(profile?.signatureCity, 100, defaultProfile.signatureCity),
+    subbagName: safeStr(profile?.subbagName, 150, defaultProfile.subbagName),
+    subbagId: safeStr(profile?.subbagId, 50, defaultProfile.subbagId),
+    subbagPosition: safeStr(profile?.subbagPosition, 150, defaultProfile.subbagPosition),
+    headmasterName: safeStr(profile?.headmasterName, 150, defaultProfile.headmasterName),
+    headmasterId: safeStr(profile?.headmasterId, 50, defaultProfile.headmasterId),
+    headmasterPosition: safeStr(profile?.headmasterPosition, 150, defaultProfile.headmasterPosition),
+    reminderEnabled: Boolean(profile?.reminderEnabled ?? true),
+    reminderHour: Math.min(23, Math.max(0, Number(profile?.reminderHour ?? 16) || 16)),
+    reminderMinute: Math.min(59, Math.max(0, Number(profile?.reminderMinute ?? 30) || 30)),
+    id: 1
+  };
   try {
     localStorage.setItem(LS_PROFILE_KEY, JSON.stringify(data));
   } catch (e) {
@@ -229,9 +258,18 @@ export async function saveEntry(entry) {
     ? Number(entry.id)
     : generateUniqueId();
 
+  const rawImages = Array.isArray(entry.evidenceImages)
+    ? entry.evidenceImages
+    : (entry.evidenceImage ? [entry.evidenceImage] : []);
+  const safeImages = rawImages.filter(isSafeImageDataUrl).slice(0, 10);
+
   const toSave = {
     ...entry,
     id: numericId,
+    description: typeof entry.description === 'string' ? entry.description.trim().slice(0, 2000) : '',
+    evidenceText: typeof entry.evidenceText === 'string' ? (entry.evidenceText.trim().slice(0, 500) || null) : null,
+    evidenceImages: safeImages,
+    evidenceImage: safeImages[0] || null,
     updatedAt: Date.now()
   };
 

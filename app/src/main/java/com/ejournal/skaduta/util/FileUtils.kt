@@ -210,6 +210,7 @@ object FileUtils {
     }
 
     fun savePdfToPublicDownloads(context: Context, sourceFile: File): String? {
+        if (!sourceFile.exists() || !isSafeReportFile(context, sourceFile)) return null
         // Security: pastikan nama file aman dari karakter path traversal
         val fileName = sourceFile.name.replace(Regex("[^a-zA-Z0-9._-]"), "_")
         return try {
@@ -223,14 +224,23 @@ object FileUtils {
                 }
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, contentValues)
                 if (uri != null) {
-                    resolver.openOutputStream(uri)?.use { out ->
-                        sourceFile.inputStream().use { input ->
-                            input.copyTo(out)
+                    try {
+                        val outStream = resolver.openOutputStream(uri) ?: throw IllegalStateException("OutputStream null")
+                        outStream.use { out ->
+                            sourceFile.inputStream().use { input ->
+                                input.copyTo(out)
+                            }
                         }
+                        contentValues.clear()
+                        contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                        resolver.update(uri, contentValues, null, null)
+                    } catch (e: Exception) {
+                        try {
+                            resolver.delete(uri, null, null)
+                        } catch (_: Exception) {
+                        }
+                        throw e
                     }
-                    contentValues.clear()
-                    contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
-                    resolver.update(uri, contentValues, null, null)
                 }
                 "Download/$fileName"
             } else {

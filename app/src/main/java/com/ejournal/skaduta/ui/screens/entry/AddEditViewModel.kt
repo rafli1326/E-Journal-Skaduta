@@ -22,8 +22,11 @@ data class TaskDraft(
     val existingEntryId: Long = 0,
     val description: String = "",
     val evidenceText: String = "",
-    val evidenceImagePath: String? = null
-)
+    val evidenceImagePaths: List<String> = emptyList()
+) {
+    val evidenceImagePath: String?
+        get() = if (evidenceImagePaths.isEmpty()) null else evidenceImagePaths.joinToString("|")
+}
 
 class AddEditViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -31,11 +34,13 @@ class AddEditViewModel(application: Application) : AndroidViewModel(application)
         private const val MAX_DESC_LENGTH = 2000
         private const val MAX_EVIDENCE_TEXT_LENGTH = 500
         private const val MAX_TASKS_PER_DAY_BATCH = 25
+        private const val MAX_PHOTOS_PER_TASK = 10
     }
 
     private val repository: JournalRepository
     private var editingEntryId: Long = -1
-    private var originalEvidencePath: String? = null
+    private val originalEvidencePaths = mutableListOf<String>()
+    private val newlyCreatedPaths = mutableSetOf<String>()
 
     private val _dateMillis = MutableStateFlow(System.currentTimeMillis())
     val dateMillis: StateFlow<Long> = _dateMillis
@@ -67,7 +72,9 @@ class AddEditViewModel(application: Application) : AndroidViewModel(application)
         viewModelScope.launch {
             val entry = repository.getEntryByIdSync(entryId)
             if (entry != null) {
-                originalEvidencePath = entry.evidenceImagePath
+                val paths = entry.getEvidenceImagePaths()
+                originalEvidencePaths.clear()
+                originalEvidencePaths.addAll(paths)
                 _dateMillis.value = entry.dateMillis
                 _dayOfWeek.value = entry.dayOfWeek
                 _formattedDate.value = entry.formattedDate
@@ -76,7 +83,7 @@ class AddEditViewModel(application: Application) : AndroidViewModel(application)
                         existingEntryId = entry.id,
                         description = entry.description,
                         evidenceText = entry.evidenceText ?: "",
-                        evidenceImagePath = entry.evidenceImagePath
+                        evidenceImagePaths = paths
                     )
                 )
             }
@@ -101,9 +108,11 @@ class AddEditViewModel(application: Application) : AndroidViewModel(application)
         if (_taskList.value.size > 1 && index in _taskList.value.indices) {
             val current = _taskList.value.toMutableList()
             val removed = current.removeAt(index)
-            if (removed.evidenceImagePath != null && removed.evidenceImagePath != originalEvidencePath) {
-                viewModelScope.launch(Dispatchers.IO) {
-                    FileUtils.deleteEvidenceFile(getApplication(), removed.evidenceImagePath)
+            removed.evidenceImagePaths.forEach { path ->
+                if (path !in originalEvidencePaths) {
+                    viewModelScope.launch(Dispatchers.IO) {
+                        FileUtils.deleteEvidenceFile(getApplication(), path)
+                    }
                 }
             }
             _taskList.value = current
@@ -130,22 +139,55 @@ class AddEditViewModel(application: Application) : AndroidViewModel(application)
 
     fun onImageSelected(index: Int, uri: Uri) {
         viewModelScope.launch {
-            val savedPath = withContext(Dispatchers.IO) {
-                FileUtils.saveUriToInternalStorage(getApplication(), uri)
-            }
-            if (savedPath == null) {
-                _errorMessage.value = "File gambar tidak valid atau melebihi batas ukuran."
-                return@launch
-            }
             val current = _taskList.value.toMutableList()
             if (index in current.indices) {
-                val oldPath = current[index].evidenceImagePath
-                if (oldPath != null && oldPath != originalEvidencePath) {
-                    withContext(Dispatchers.IO) {
-                        FileUtils.deleteEvidenceFile(getApplication(), oldPath)
+                if (current[index].evidenceImagePaths.size >= MAX_PHOTOS_PER_TASK) {
+                    _errorMessage.value = "Maksimal $MAX_PHOTOS_PER_TASK foto per kegiatan."
+                    return@launch
+                }
+                val savedPath = withContext(Dispatchers.IO) {
+                    FileUtils.saveUriToInternalStorage(getApplication(), uri)
+                }
+                if (savedPath == null) {
+                    _errorMessage.value = "File gambar tidak valid atau melebihi batas ukuran."
+                    return@launch
+                }
+                newlyCreatedPaths.add(savedPath)
+                val updatedPaths = current[index].evidenceImagePaths + savedPath
+                current[index] = current[index].copy(evidenceImagePaths = updatedPaths)
+                _taskList.value = current
+            }
+        }
+    }
+
+    fun onMultipleImagesSelected(index: Int, uris: List<Uri>) {
+        if (uris.isEmpty()) return
+        viewModelScope.launch {
+            val current = _taskList.value.toMutableList()
+            if (index in current.indices) {
+                val existingPaths = current[index].evidenceImagePaths.toMutableList()
+                val remainingSlots = MAX_PHOTOS_PER_TASK - existingPaths.size
+                if (remainingSlots <= 0) {
+                    _errorMessage.value = "Maksimal $MAX_PHOTOS_PER_TASK foto per kegiatan."
+                    return@launch
+                }
+                val toProcess = uris.take(remainingSlots)
+                var failed = 0
+                for (u in toProcess) {
+                    val saved = withContext(Dispatchers.IO) {
+                        FileUtils.saveUriToInternalStorage(getApplication(), u)
+                    }
+                    if (saved != null) {
+                        newlyCreatedPaths.add(saved)
+                        existingPaths.add(saved)
+                    } else {
+                        failed++
                     }
                 }
-                current[index] = current[index].copy(evidenceImagePath = savedPath)
+                if (failed > 0) {
+                    _errorMessage.value = "$failed gambar gagal diproses (file tidak valid)."
+                }
+                current[index] = current[index].copy(evidenceImagePaths = existingPaths)
                 _taskList.value = current
             }
         }
@@ -153,38 +195,42 @@ class AddEditViewModel(application: Application) : AndroidViewModel(application)
 
     fun onPhotoCaptured(index: Int, tempFile: File) {
         viewModelScope.launch {
-            val savedPath = withContext(Dispatchers.IO) {
-                FileUtils.finalizeCapturedPhoto(getApplication(), tempFile)
-            }
-            if (savedPath == null) {
-                _errorMessage.value = "Gagal memproses foto kamera."
-                return@launch
-            }
             val current = _taskList.value.toMutableList()
             if (index in current.indices) {
-                val oldPath = current[index].evidenceImagePath
-                if (oldPath != null && oldPath != originalEvidencePath) {
-                    withContext(Dispatchers.IO) {
-                        FileUtils.deleteEvidenceFile(getApplication(), oldPath)
-                    }
+                if (current[index].evidenceImagePaths.size >= MAX_PHOTOS_PER_TASK) {
+                    _errorMessage.value = "Maksimal $MAX_PHOTOS_PER_TASK foto per kegiatan."
+                    return@launch
                 }
-                current[index] = current[index].copy(evidenceImagePath = savedPath)
+                val savedPath = withContext(Dispatchers.IO) {
+                    FileUtils.finalizeCapturedPhoto(getApplication(), tempFile)
+                }
+                if (savedPath == null) {
+                    _errorMessage.value = "Gagal memproses foto kamera."
+                    return@launch
+                }
+                newlyCreatedPaths.add(savedPath)
+                val updatedPaths = current[index].evidenceImagePaths + savedPath
+                current[index] = current[index].copy(evidenceImagePaths = updatedPaths)
                 _taskList.value = current
             }
         }
     }
 
-    fun removeImage(index: Int) {
+    fun removeImage(taskIndex: Int, imageIndex: Int) {
         val current = _taskList.value.toMutableList()
-        if (index in current.indices) {
-            val oldPath = current[index].evidenceImagePath
-            if (oldPath != null && oldPath != originalEvidencePath) {
-                viewModelScope.launch(Dispatchers.IO) {
-                    FileUtils.deleteEvidenceFile(getApplication(), oldPath)
+        if (taskIndex in current.indices) {
+            val paths = current[taskIndex].evidenceImagePaths.toMutableList()
+            if (imageIndex in paths.indices) {
+                val removedPath = paths.removeAt(imageIndex)
+                if (removedPath !in originalEvidencePaths) {
+                    newlyCreatedPaths.remove(removedPath)
+                    viewModelScope.launch(Dispatchers.IO) {
+                        FileUtils.deleteEvidenceFile(getApplication(), removedPath)
+                    }
                 }
+                current[taskIndex] = current[taskIndex].copy(evidenceImagePaths = paths)
+                _taskList.value = current
             }
-            current[index] = current[index].copy(evidenceImagePath = null)
-            _taskList.value = current
         }
     }
 
@@ -197,22 +243,27 @@ class AddEditViewModel(application: Application) : AndroidViewModel(application)
 
         viewModelScope.launch {
             for (task in tasks) {
+                val hasImages = task.evidenceImagePaths.isNotEmpty()
                 val entry = JournalEntry(
                     id = task.existingEntryId,
                     dateMillis = _dateMillis.value,
                     dayOfWeek = _dayOfWeek.value,
                     formattedDate = _formattedDate.value,
                     description = task.description.trim().take(MAX_DESC_LENGTH),
-                    evidenceType = "COMBINED",
+                    evidenceType = if (hasImages) JournalEntry.EVIDENCE_TYPE_IMAGE else JournalEntry.EVIDENCE_TYPE_TEXT,
                     evidenceText = task.evidenceText.trim().take(MAX_EVIDENCE_TEXT_LENGTH).ifBlank { null },
                     evidenceImagePath = task.evidenceImagePath,
                     updatedAt = System.currentTimeMillis()
                 )
 
                 if (task.existingEntryId > 0) {
-                    if (originalEvidencePath != null && originalEvidencePath != task.evidenceImagePath) {
-                        withContext(Dispatchers.IO) {
-                            FileUtils.deleteEvidenceFile(getApplication(), originalEvidencePath)
+                    // Check if any original photos were removed
+                    val remainingOriginals = task.evidenceImagePaths.toSet()
+                    originalEvidencePaths.forEach { orig ->
+                        if (orig !in remainingOriginals) {
+                            withContext(Dispatchers.IO) {
+                                FileUtils.deleteEvidenceFile(getApplication(), orig)
+                            }
                         }
                     }
                     repository.updateEntry(entry)
@@ -220,7 +271,22 @@ class AddEditViewModel(application: Application) : AndroidViewModel(application)
                     repository.insertEntry(entry)
                 }
             }
+            newlyCreatedPaths.clear()
             _isSaved.value = true
+        }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        if (!_isSaved.value && newlyCreatedPaths.isNotEmpty()) {
+            val app = getApplication<Application>()
+            val orphanPaths = newlyCreatedPaths.toList()
+            newlyCreatedPaths.clear()
+            kotlinx.coroutines.CoroutineScope(Dispatchers.IO).launch {
+                orphanPaths.forEach { path ->
+                    FileUtils.deleteEvidenceFile(app, path)
+                }
+            }
         }
     }
 

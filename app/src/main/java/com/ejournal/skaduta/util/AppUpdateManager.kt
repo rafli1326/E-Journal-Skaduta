@@ -15,11 +15,14 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.Locale
+import javax.net.ssl.HttpsURLConnection
 
 data class UpdateInfo(
     val hasUpdate: Boolean,
@@ -36,6 +39,16 @@ object AppUpdateManager {
     private const val GITHUB_OWNER = "rafli1326"
     private const val GITHUB_REPO = "E-Journal-Skaduta"
     private const val LATEST_RELEASE_URL = "https://api.github.com/repos/$GITHUB_OWNER/$GITHUB_REPO/releases/latest"
+
+    private const val MAX_JSON_RESPONSE_BYTES = 512 * 1024 // 512 KB
+    private const val MAX_APK_DOWNLOAD_BYTES = 100L * 1024 * 1024 // 100 MB
+
+    private val ALLOWED_UPDATE_HOSTS = setOf(
+        "api.github.com",
+        "github.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com"
+    )
 
     private val _isChecking = MutableStateFlow(false)
     val isChecking: StateFlow<Boolean> = _isChecking.asStateFlow()
@@ -63,6 +76,39 @@ object AppUpdateManager {
         _showUpdateDialog.value = false
     }
 
+    /**
+     * Memastikan URL unduhan hanya menggunakan protokol HTTPS dan berasal dari domain resmi GitHub.
+     */
+    private fun isTrustedUpdateUrl(urlStr: String): Boolean {
+        return try {
+            val url = URL(urlStr)
+            if (!"https".equals(url.protocol, ignoreCase = true)) return false
+            val host = url.host?.lowercase(Locale.ROOT) ?: return false
+            ALLOWED_UPDATE_HOSTS.any { allowed ->
+                host == allowed || host.endsWith(".$allowed")
+            }
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Membaca teks dari InputStream dengan batas maksimum byte untuk mencegah Memory Exhaustion (DoS).
+     */
+    private fun readBoundedText(input: InputStream, maxBytes: Int): String? {
+        val out = ByteArrayOutputStream()
+        val buf = ByteArray(4096)
+        var total = 0
+        while (true) {
+            val n = input.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > maxBytes) return null
+            out.write(buf, 0, n)
+        }
+        return out.toString(Charsets.UTF_8.name())
+    }
+
     fun getCurrentVersionName(context: Context): String {
         return try {
             val pInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -82,11 +128,13 @@ object AppUpdateManager {
 
         CoroutineScope(Dispatchers.IO).launch {
             _isChecking.value = true
+            var connection: HttpsURLConnection? = null
             try {
                 val currentVersion = getCurrentVersionName(context)
                 val url = URL(LATEST_RELEASE_URL)
-                val connection = (url.openConnection() as HttpURLConnection).apply {
+                connection = (url.openConnection() as HttpsURLConnection).apply {
                     requestMethod = "GET"
+                    instanceFollowRedirects = false
                     connectTimeout = 10000
                     readTimeout = 10000
                     setRequestProperty("Accept", "application/vnd.github.v3+json")
@@ -94,12 +142,14 @@ object AppUpdateManager {
                 }
 
                 if (connection.responseCode == HttpURLConnection.HTTP_OK) {
-                    val responseStr = connection.inputStream.bufferedReader().use { it.readText() }
+                    val responseStr = connection.inputStream.use { readBoundedText(it, MAX_JSON_RESPONSE_BYTES) }
+                        ?: throw IllegalStateException("Respons server terlalu besar")
                     val json = JSONObject(responseStr)
 
-                    val tagName = json.optString("tag_name", "").removePrefix("v").removePrefix("V").trim()
-                    val releaseTitle = json.optString("name", "Pembaruan Aplikasi")
-                    val releaseNotes = json.optString("body", "Peningkatan performa dan perbaikan sistem.")
+                    val rawTag = json.optString("tag_name", "").removePrefix("v").removePrefix("V").trim()
+                    val safeTag = rawTag.replace(Regex("[^0-9A-Za-z._-]"), "").take(32)
+                    val releaseTitle = json.optString("name", "Pembaruan Aplikasi").take(200)
+                    val releaseNotes = json.optString("body", "Peningkatan performa dan perbaikan sistem.").take(4000)
 
                     var apkUrl = ""
                     var apkSize = 0L
@@ -109,18 +159,23 @@ object AppUpdateManager {
                         for (i in 0 until assets.length()) {
                             val asset = assets.getJSONObject(i)
                             val name = asset.optString("name", "")
-                            if (name.endsWith(".apk", ignoreCase = true)) {
-                                apkUrl = asset.optString("browser_download_url", "")
-                                apkSize = asset.optLong("size", 0L)
+                            val candidateUrl = asset.optString("browser_download_url", "")
+                            if (name.endsWith(".apk", ignoreCase = true) && isTrustedUpdateUrl(candidateUrl)) {
+                                apkUrl = candidateUrl
+                                apkSize = asset.optLong("size", 0L).coerceAtLeast(0L)
                                 break
                             }
                         }
                     }
 
-                    val hasUpdate = isNewerVersion(currentVersion, tagName) && apkUrl.isNotBlank()
+                    val hasUpdate = safeTag.isNotEmpty() &&
+                        isNewerVersion(currentVersion, safeTag) &&
+                        apkUrl.isNotBlank() &&
+                        apkSize <= MAX_APK_DOWNLOAD_BYTES
+
                     val info = UpdateInfo(
                         hasUpdate = hasUpdate,
-                        latestVersion = tagName,
+                        latestVersion = safeTag,
                         currentVersion = currentVersion,
                         releaseTitle = releaseTitle,
                         releaseNotes = releaseNotes,
@@ -141,13 +196,14 @@ object AppUpdateManager {
                         _statusMessage.value = "Gagal memeriksa pembaruan (Kode: ${connection.responseCode})"
                     }
                 }
-            } catch (e: Exception) {
+            } catch (_: Exception) {
                 if (isManual) {
                     withContext(Dispatchers.Main) {
                         _statusMessage.value = "Tidak dapat terhubung ke server pembaruan."
                     }
                 }
             } finally {
+                connection?.disconnect()
                 _isChecking.value = false
             }
         }
@@ -176,13 +232,14 @@ object AppUpdateManager {
     }
 
     fun downloadAndInstall(context: Context, info: UpdateInfo) {
-        if (_isDownloading.value || info.apkDownloadUrl.isBlank()) return
+        if (_isDownloading.value || info.apkDownloadUrl.isBlank() || !isTrustedUpdateUrl(info.apkDownloadUrl)) return
 
         CoroutineScope(Dispatchers.IO).launch {
             _isDownloading.value = true
             _downloadProgress.value = 0f
 
             var stagingFile: File? = null
+            var connection: HttpsURLConnection? = null
             try {
                 val updatesDir = File(context.cacheDir, "apk_updates")
                 if (!updatesDir.exists()) {
@@ -192,40 +249,60 @@ object AppUpdateManager {
                 // Bersihkan unduhan lama
                 updatesDir.listFiles()?.forEach { it.delete() }
 
-                val targetApk = File(updatesDir, "E-Journal-Skaduta-v${info.latestVersion}.apk")
+                val safeVersion = info.latestVersion.replace(Regex("[^0-9A-Za-z._-]"), "_").take(32).ifBlank { "latest" }
+                val targetApk = File(updatesDir, "E-Journal-Skaduta-v$safeVersion.apk")
                 stagingFile = File(updatesDir, "download.tmp")
 
-                val url = URL(info.apkDownloadUrl)
-                var connection = (url.openConnection() as HttpURLConnection).apply {
-                    instanceFollowRedirects = true
-                    connectTimeout = 15000
-                    readTimeout = 15000
-                    setRequestProperty("User-Agent", "E-Journal-Skaduta-Android")
-                }
-
-                // Handle redirect (GitHub release download url redirects to AWS S3)
+                var currentUrlStr = info.apkDownloadUrl
                 var redirectCount = 0
-                while (connection.responseCode in 300..399 && redirectCount < 5) {
-                    val newUrl = connection.getHeaderField("Location") ?: break
-                    connection.disconnect()
-                    connection = (URL(newUrl).openConnection() as HttpURLConnection).apply {
-                        instanceFollowRedirects = true
+
+                while (true) {
+                    if (!isTrustedUpdateUrl(currentUrlStr)) {
+                        throw SecurityException("URL pengunduhan tidak terpercaya")
+                    }
+                    connection = (URL(currentUrlStr).openConnection() as HttpsURLConnection).apply {
+                        requestMethod = "GET"
+                        instanceFollowRedirects = false
                         connectTimeout = 15000
                         readTimeout = 15000
+                        setRequestProperty("User-Agent", "E-Journal-Skaduta-Android")
                     }
-                    redirectCount++
+
+                    val code = connection.responseCode
+                    if (code in 300..399 && redirectCount < 5) {
+                        val location = connection.getHeaderField("Location")
+                            ?: throw SecurityException("Header redirect tidak valid")
+                        val resolvedUrl = URL(URL(currentUrlStr), location).toString()
+                        connection.disconnect()
+                        currentUrlStr = resolvedUrl
+                        redirectCount++
+                    } else {
+                        break
+                    }
                 }
 
-                val totalBytes = connection.contentLengthLong.let { if (it <= 0) info.apkSize else it }
+                val finalConn = connection ?: throw IllegalStateException("Koneksi gagal")
+                if (finalConn.responseCode != HttpURLConnection.HTTP_OK) {
+                    throw IllegalStateException("Server mengembalikan kode ${finalConn.responseCode}")
+                }
+
+                val totalBytes = finalConn.contentLengthLong.let { if (it <= 0) info.apkSize else it }
+                if (totalBytes > MAX_APK_DOWNLOAD_BYTES) {
+                    throw SecurityException("Ukuran berkas APK melebihi batas aman")
+                }
+
                 var downloadedBytes = 0L
 
-                connection.inputStream.use { input: InputStream ->
+                finalConn.inputStream.use { input: InputStream ->
                     FileOutputStream(stagingFile).use { output ->
                         val buffer = ByteArray(8192)
                         var bytesRead: Int
                         while (input.read(buffer).also { bytesRead = it } != -1) {
-                            output.write(buffer, 0, bytesRead)
                             downloadedBytes += bytesRead
+                            if (downloadedBytes > MAX_APK_DOWNLOAD_BYTES) {
+                                throw SecurityException("Ukuran unduhan melebihi batas aman")
+                            }
+                            output.write(buffer, 0, bytesRead)
                             if (totalBytes > 0) {
                                 val prog = (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
                                 _downloadProgress.value = prog
@@ -235,7 +312,15 @@ object AppUpdateManager {
                     }
                 }
 
-                stagingFile.renameTo(targetApk)
+                if (downloadedBytes <= 0L || !stagingFile.renameTo(targetApk)) {
+                    throw IllegalStateException("Gagal menyimpan berkas pembaruan")
+                }
+
+                // Security: verifikasi bahwa file yang diunduh benar-benar APK untuk package ini
+                if (!verifyDownloadedApk(context, targetApk)) {
+                    targetApk.delete()
+                    throw SecurityException("Berkas APK tidak valid atau bukan milik aplikasi ini")
+                }
 
                 withContext(Dispatchers.Main) {
                     _isDownloading.value = false
@@ -246,14 +331,42 @@ object AppUpdateManager {
                 stagingFile?.delete()
                 withContext(Dispatchers.Main) {
                     _isDownloading.value = false
-                    _statusMessage.value = "Gagal mengunduh berkas pembaruan: ${e.message}"
+                    _statusMessage.value = "Gagal mengunduh berkas pembaruan."
                 }
+            } finally {
+                connection?.disconnect()
             }
         }
     }
 
+    private fun isSafeApkFile(context: Context, file: File): Boolean {
+        return try {
+            val canonical = file.canonicalPath
+            val updatesDir = File(context.cacheDir, "apk_updates").canonicalPath
+            canonical.startsWith("$updatesDir${File.separator}") && canonical.endsWith(".apk", ignoreCase = true)
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    private fun verifyDownloadedApk(context: Context, apkFile: File): Boolean {
+        return try {
+            if (!apkFile.exists() || !isSafeApkFile(context, apkFile)) return false
+            val pm = context.packageManager
+            val archiveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageArchiveInfo(apkFile.absolutePath, 0)
+            }
+            archiveInfo != null && archiveInfo.packageName == context.packageName
+        } catch (_: Exception) {
+            false
+        }
+    }
+
     fun installApk(context: Context, apkFile: File) {
-        if (!apkFile.exists()) return
+        if (!apkFile.exists() || !isSafeApkFile(context, apkFile)) return
 
         // Pada Android 8.0+ (Oreo / API 26+), periksa izin pasang aplikasi dari sumber ini
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -282,4 +395,3 @@ object AppUpdateManager {
         context.startActivity(installIntent)
     }
 }
-

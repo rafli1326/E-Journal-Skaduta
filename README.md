@@ -10,6 +10,7 @@ Tersedia dalam dua varian terpadu: **Aplikasi Android Native** dan **Web Compani
 
 ### 1. 📝 Pencatatan Jurnal Harian (*Daily Work Log*)
 * **Multi-Tugas per Tanggal**: Memungkinkan pencatatan beberapa uraian kegiatan kerja sekaligus dalam satu tanggal yang sama.
+* **Multi-Foto per Kegiatan**: Mendukung lampiran lebih dari 1 foto bukti fisik per kegiatan (hingga 10 foto) dengan pratinjau thumbnail dan opsi hapus per foto.
 * **Kalender & Tanggal Fleksibel**: Pemilihan hari dan tanggal kerja dinamis dengan antarmuka kalender interaktif.
 * **Bukti Dukung Lengkap**:
   * **Bukti Teks**: Nomor surat dinas, tautan berkas cloud, atau ringkasan hasil pekerjaan.
@@ -17,14 +18,15 @@ Tersedia dalam dua varian terpadu: **Aplikasi Android Native** dan **Web Compani
 * **Pencarian Cepat (*Instant Search*)**: Filter kegiatan harian secara *real-time* berdasarkan kata kunci tugas, tanggal, atau bukti dukung.
 
 ### 2. 📄 Generator Laporan Bulanan PDF A4 Standar Dinas
-* **Tabel Rekapitulasi Terstruktur**: Pengelompokan rapi 1 baris per tanggal kerja dengan penomoran urut otomatis.
-* **Lembar Pengesahan Tanda Tangan 3 Pihak**:
+* **Tabel Rekapitulasi Terstruktur**: Pengelompokan rapi 1 baris per tanggal kerja dengan penomoran urut otomatis, tipografi **Roboto 11 pt**, tata letak rata tengah, line spacing 1.0, serta thumbnail selebar kolom (1 foto per kegiatan).
+* **Lembar Pengesahan Tanda Tangan 3 Pihak**: Ruang tanda tangan leluasa (+2 enter) untuk penandatanganan fisik/stempel resmi:
   1. Pegawai Yang Bersangkutan (Penyusun Laporan)
   2. Memeriksa / Mengetahui: Kepala Sub Bagian Tata Usaha (Atasan Langsung)
   3. Mengesahkan: Kepala Sekolah (Pimpinan Instansi)
-* **Lampiran Bukti Dokumentasi Foto Otomatis**:
-  * Jika ada kegiatan yang menyertakan foto, dokumen PDF secara otomatis menyertakan lembar khusus **"LAMPIRAN BUKTI DOKUMENTASI FOTO KEGIATAN"** setelah lembar tanda tangan.
-  * Foto ditampilkan dalam resolusi tinggi dengan bingkai kartu formal, badge tanggal, uraian kegiatan, dan keterangan bukti teks.
+* **Lampiran Khusus Foto Opsional & Kolase Terpadu**:
+  * Tersedia toggle/sakelar untuk menyertakan atau mengecualikan lembar lampiran foto.
+  * Susunan **Kolase Adaptif Terpadu per Kegiatan** (1 foto: ukuran besar tengah; 2 foto: 2 kolom; 3 foto: 3 kolom sejajar; 4 foto: grid 2×2; 5+ foto: grid 3 kolom).
+  * Header lampiran bulanan hanya dicetak satu kali di lembar pertama lampiran.
 * **Penomoran Halaman Seragam**: Tercetak nomor halaman resmi (`Hal. X dari Y`) di seluruh lembar PDF.
 * **Pratinjau & Berbagi Berkas**: Langsung tersimpan ke direktori Download perangkat dan siap dicetak atau dibagikan via WhatsApp, Email, dan Google Drive.
 

@@ -7,6 +7,8 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -100,9 +102,11 @@ fun AddEditJournalScreen(
     var tempCameraUri by remember { mutableStateOf<Uri?>(null) }
 
     val galleryLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        uri?.let { viewModel.onImageSelected(activeImageIndex, it) }
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris: List<Uri> ->
+        if (uris.isNotEmpty()) {
+            viewModel.onMultipleImagesSelected(activeImageIndex, uris)
+        }
     }
 
     val cameraLauncher = rememberLauncherForActivityResult(
@@ -315,71 +319,96 @@ fun AddEditJournalScreen(
 
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // Lampiran Media / Foto Bukti Dukung
-                        if (task.evidenceImagePath != null) {
-                            val file = remember(task.evidenceImagePath) { File(task.evidenceImagePath) }
-                            Box(
+                        // Lampiran Media / Foto Bukti Dukung (Bisa Lebih dari 1 Foto)
+                        if (task.evidenceImagePaths.isNotEmpty()) {
+                            Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(130.dp)
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                                    .horizontalScroll(rememberScrollState()),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                AsyncImage(
-                                    model = file,
-                                    contentDescription = "Bukti Foto",
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentScale = ContentScale.Crop
-                                )
-                                IconButton(
-                                    onClick = { viewModel.removeImage(index) },
-                                    modifier = Modifier
-                                        .align(Alignment.TopEnd)
-                                        .padding(6.dp)
-                                        .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.85f), RoundedCornerShape(20.dp))
-                                        .size(28.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Close,
-                                        contentDescription = "Hapus Foto",
-                                        tint = MaterialTheme.colorScheme.error,
-                                        modifier = Modifier.size(16.dp)
-                                    )
+                                task.evidenceImagePaths.forEachIndexed { imgIdx, path ->
+                                    val file = remember(path) { File(path) }
+                                    val isSafe = remember(path) { file.exists() && FileUtils.isSafeEvidenceFile(context, file) }
+                                    Box(
+                                        modifier = Modifier
+                                            .size(96.dp)
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(8.dp))
+                                    ) {
+                                        if (isSafe) {
+                                            AsyncImage(
+                                                model = file,
+                                                contentDescription = "Bukti Foto #${imgIdx + 1}",
+                                                modifier = Modifier.fillMaxSize(),
+                                                contentScale = ContentScale.Crop
+                                            )
+                                        }
+                                        IconButton(
+                                            onClick = { viewModel.removeImage(index, imgIdx) },
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(4.dp)
+                                                .background(Color.Black.copy(alpha = 0.65f), CircleShape)
+                                                .size(24.dp)
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Close,
+                                                contentDescription = "Hapus Foto",
+                                                tint = Color.White,
+                                                modifier = Modifier.size(14.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
-                        } else {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                OutlinedButton(
-                                    onClick = {
-                                        activeImageIndex = index
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            OutlinedButton(
+                                onClick = {
+                                    activeImageIndex = index
+                                    try {
+                                        tempCameraFile?.delete()
                                         val (file, uri) = FileUtils.createTempImageUri(context)
                                         tempCameraFile = file
                                         tempCameraUri = uri
                                         cameraLauncher.launch(uri)
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Icon(imageVector = Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Ambil Foto", style = MaterialTheme.typography.bodySmall)
-                                }
+                                    } catch (_: Exception) {
+                                        tempCameraFile?.delete()
+                                        tempCameraFile = null
+                                        tempCameraUri = null
+                                    }
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (task.evidenceImagePaths.isNotEmpty()) "+ Kamera" else "Ambil Foto",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
 
-                                OutlinedButton(
-                                    onClick = {
-                                        activeImageIndex = index
-                                        galleryLauncher.launch("image/*")
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(8.dp)
-                                ) {
-                                    Icon(imageVector = Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Pilih Galeri", style = MaterialTheme.typography.bodySmall)
-                                }
+                            OutlinedButton(
+                                onClick = {
+                                    activeImageIndex = index
+                                    galleryLauncher.launch("image/*")
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Icon(imageVector = Icons.Default.Image, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (task.evidenceImagePaths.isNotEmpty()) "+ Galeri" else "Pilih Galeri",
+                                    style = MaterialTheme.typography.bodySmall
+                                )
                             }
                         }
                     }

@@ -40,6 +40,9 @@ class MonthlyReportViewModel(application: Application) : AndroidViewModel(applic
     private val _isGenerating = MutableStateFlow(false)
     val isGenerating: StateFlow<Boolean> = _isGenerating
 
+    private val _includePhotoAppendix = MutableStateFlow(true)
+    val includePhotoAppendix: StateFlow<Boolean> = _includePhotoAppendix
+
     private val _generatedPdfFile = MutableStateFlow<File?>(null)
     val generatedPdfFile: StateFlow<File?> = _generatedPdfFile
 
@@ -71,6 +74,10 @@ class MonthlyReportViewModel(application: Application) : AndroidViewModel(applic
         _generatedPdfFile.value = null // reset previously generated file
     }
 
+    fun setIncludePhotoAppendix(include: Boolean) {
+        _includePhotoAppendix.value = include
+    }
+
     fun generatePdf() {
         if (_isGenerating.value) return
 
@@ -92,7 +99,8 @@ class MonthlyReportViewModel(application: Application) : AndroidViewModel(applic
                         entries = entries,
                         profile = currentProfile,
                         monthIndex = _selectedMonth.value,
-                        year = _selectedYear.value
+                        year = _selectedYear.value,
+                        includePhotoAppendix = _includePhotoAppendix.value
                     )
                     // Otomatis simpan ke folder Download publik HP
                     FileUtils.savePdfToPublicDownloads(getApplication(), file)

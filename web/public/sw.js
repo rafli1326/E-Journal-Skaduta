@@ -1,4 +1,4 @@
-const CACHE_NAME = 'ejournal-skaduta-v6';
+const CACHE_NAME = 'ejournal-skaduta-v7';
 const ASSETS = [
   './',
   './index.html',
@@ -6,7 +6,9 @@ const ASSETS = [
   './favicon.png',
   './icons/icon-192.png',
   './icons/icon-512.png',
-  './logo_smk2_tanjung.png'
+  './logo_smk2_tanjung.png',
+  './fonts/Roboto-Regular.ttf',
+  './fonts/Roboto-Bold.ttf'
 ];
 
 self.addEventListener('install', (event) => {
@@ -40,9 +42,22 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Network-First strategy: selalu ambil versi terbaru jika online, gunakan cache jika offline
+// Network-First strategy: hanya intersep request GET same-origin
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
+
+  let reqUrl;
+  try {
+    reqUrl = new URL(event.request.url);
+  } catch {
+    return;
+  }
+
+  // Security: jangan pernah cache atau intersep request lintas domain (cross-origin) atau skema non-http(s)
+  if (reqUrl.origin !== self.location.origin || (reqUrl.protocol !== 'http:' && reqUrl.protocol !== 'https:')) {
+    return;
+  }
+
   event.respondWith(
     fetch(event.request)
       .then((networkResponse) => {

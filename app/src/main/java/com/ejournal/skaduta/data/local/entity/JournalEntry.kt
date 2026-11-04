@@ -25,5 +25,10 @@ data class JournalEntry(
         const val EVIDENCE_TYPE_TEXT = "TEXT"
         const val EVIDENCE_TYPE_IMAGE = "IMAGE"
     }
+
+    fun getEvidenceImagePaths(): List<String> {
+        if (evidenceImagePath.isNullOrBlank()) return emptyList()
+        return evidenceImagePath.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+    }
 }
 
